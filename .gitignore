@@ -1,18 +1,13 @@
-/Database/hidyBot.db
+/Database/smartkamavpn.db
 /Logs
 /Backup
 /UserBot/Receiptions
 /.idea
 /temp
-/Utils/swapWallet.py
 
 /.handler-saves
-hiddifypanel.db
 config.json
 
 *.pyc
-*.pyo!/qodana.yaml
-qodana.yaml
-check-host.py
+*.pyo
 .vscode/launch.json
-Database/hidyBot1.db

@@ -7,7 +7,7 @@ YELLOW='\033[1;33m'
 RESET='\033[0m' # Reset text color
 
 HIDY_BOT_ID="@HidyBotGroup"
-INSTALL_DIR="/opt/SmartKamaVPN-Bot"
+INSTALL_DIR="/opt/SmartKamaVPN"
 
 # Function to display error messages and exit
 function display_error_and_exit() {

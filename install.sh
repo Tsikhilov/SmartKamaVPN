@@ -87,8 +87,8 @@ fi
 
 echo -e "${GREEN}Step 1: Cloning the repository and changing directory...${RESET}"
 
-repository_url="https://github.com/B3H1Z/SmartKamaVPN-Bot.git"
-install_dir="/opt/SmartKamaVPN-Bot"
+repository_url="https://github.com/Tsikhilov/SmartKamaVPN.git"
+install_dir="/opt/SmartKamaVPN"
 
 branch="main"
 

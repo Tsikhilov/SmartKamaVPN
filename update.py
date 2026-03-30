@@ -3,9 +3,9 @@ import sqlite3
 import argparse
 import logging
 import os
-USERS_DB_LOC = os.path.join(os.getcwd(), "Database", "hidyBot.db")
+USERS_DB_LOC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Database", "smartkamavpn.db")
 
-LOG_LOC = os.path.join(os.getcwd(), "Logs", "update.log")
+LOG_LOC = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Logs", "update.log")
 logging.basicConfig(handlers=[logging.FileHandler(filename=LOG_LOC,
                                                   encoding='utf-8', mode='w')],
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -257,3 +257,4 @@ if __name__ == "__main__":
     else:
         logging.info("No update is needed")
         print("No update is needed")
+

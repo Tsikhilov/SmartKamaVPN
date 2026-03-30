@@ -4,7 +4,7 @@
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 RESET='\033[0m' # Reset text color
-install_dir="/opt/SmartKamaVPN-Bot"
+install_dir="/opt/SmartKamaVPN"
 
 # Function to display error messages and exit
 function display_error_and_exit() {
@@ -29,6 +29,6 @@ sleep 5
 echo -e "${GREEN}Starting the bot...${RESET}"
 
 > $install_dir/bot.log
-nohup python3 /opt/SmartKamaVPN-Bot/smartkamavpnTelegramBot.py >> /opt/SmartKamaVPN-Bot/bot.log 2>&1 &
+nohup python3 /opt/SmartKamaVPN/smartkamavpnTelegramBot.py >> /opt/SmartKamaVPN/bot.log 2>&1 &
 
 echo -e "${GREEN}Bot has been restarted.${RESET}"

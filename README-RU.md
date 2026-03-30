@@ -25,14 +25,14 @@ Telegram бот для управления VPN-подписками на баз
 ### Автоматическая установка
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/yourusername/SmartKamaVPN-Bot/main/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/Tsikhilov/SmartKamaVPN/main/install.sh)
 ```
 
 ### Ручная установка
 
 1. Клонируйте репозиторий:
 ```bash
-git clone https://github.com/yourusername/SmartKamaVPN-Bot.git
+git clone https://github.com/Tsikhilov/SmartKamaVPN.git
 cd SmartKamaVPN-Bot
 ```
 
@@ -95,3 +95,4 @@ MIT License
 ## Поддержка
 
 Telegram: @SmartKamaVPSupport
+

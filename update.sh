@@ -7,7 +7,7 @@ GREEN='\033[0;32m'
 RED='\033[0;31m'
 YELLOW='\033[0;33m'
 RESET='\033[0m' # Reset text color
-install_dir="/opt/SmartKamaVPN-Bot"
+install_dir="/opt/SmartKamaVPN"
 
 # Function to display colored messages
 function display_message() {
@@ -59,7 +59,7 @@ function reinstall_bot() {
       rm -rf /opt/SmartKamaVPN-Bot
 
       # Run the installation script
-      bash -c "$(curl -Lfo- https://raw.githubusercontent.com/B3H1Z/SmartKamaVPN-Bot/main/install.sh)"
+      bash -c "$(curl -Lfo- https://raw.githubusercontent.com/Tsikhilov/SmartKamaVPN/main/install.sh)"
 
       display_message "${GREEN}Bot has been reinstalled.${RESET}"
       ;;
@@ -112,10 +112,10 @@ function update_bot() {
 # get backup of Database/hidyBot.db
 function get_backup() {
   display_message "${GREEN}Getting backup of Database/hidyBot.db...${RESET}"
-  if cp /opt/SmartKamaVPN-Bot/Database/hidyBot.db /opt/SmartKamaVPN-Bot/Database/hidyBot.db.bak; then
-    display_message "${GREEN}Backup of Database/hidyBot.db has been taken.${RESET}"
+  if cp /opt/SmartKamaVPN/Database/smartkamavpn.db /opt/SmartKamaVPN/Database/smartkamavpn.db.bak; then
+    display_message "${GREEN}Backup of Database/smartkamavpn.db has been taken.${RESET}"
   else
-    display_message "${RED}Failed to get backup of Database/hidyBot.db.${RESET}"
+    display_message "${RED}Failed to get backup of Database/smartkamavpn.db.${RESET}"
   fi
 }
 
@@ -126,11 +126,11 @@ stop_bot
 display_message "Please wait for 5 seconds ..."
 sleep 5
 # If version.py does not exist, offer to reinstall the bot; otherwise, update it
-if [ ! -f /opt/SmartKamaVPN-Bot/version.py ]; then
+if [ ! -f /opt/SmartKamaVPN/version.py ]; then
   reinstall_bot
 else
 
-  current_version=$(python3 /opt/SmartKamaVPN-Bot/version.py --version)  
+  current_version=$(python3 /opt/SmartKamaVPN/version.py --version)  
   get_backup
   update_bot
 
@@ -146,7 +146,7 @@ else
   echo -e "${YELLOW}Current version: $current_version${RESET}"
   echo -e "${YELLOW}Target version: $target_version${RESET}"
   
-  if python3 /opt/SmartKamaVPN-Bot/update.py --current-version "$current_version" --target-version "$target_version"; then
+  if python3 /opt/SmartKamaVPN/update.py --current-version "$current_version" --target-version "$target_version"; then
       echo "update.py has been run."
   else
       echo "update.py has not been run."
