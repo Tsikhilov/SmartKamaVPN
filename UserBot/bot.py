@@ -1,6 +1,8 @@
 import datetime
 import random
 import os
+import time
+from urllib.parse import urlparse
 
 import telebot
 from telebot.types import Message, CallbackQuery
@@ -18,7 +20,10 @@ from Utils.yookassa import YooKassaPayment, get_yookassa_settings
 
 # *********************************** Configuration Bot ***********************************
 bot = telebot.TeleBot(CLIENT_TOKEN, parse_mode="HTML")
-bot.remove_webhook()
+try:
+    bot.remove_webhook()
+except Exception as e:
+    logging.warning(f"Failed to remove user bot webhook during init: {e}")
 admin_bot = admin_bot()
 BASE_URL = f"{urlparse(PANEL_URL).scheme}://{urlparse(PANEL_URL).netloc}"
 selected_server_id = 0
@@ -111,6 +116,144 @@ def is_user_in_channel(user_id):
                              reply_markup=force_join_channel_markup(settings['channel_id']))
             return False
     return True
+
+
+def _build_channel_link(settings):
+    channel_id = settings.get('channel_id')
+    if not channel_id:
+        return "не указан"
+    if str(channel_id).startswith('@'):
+        return f"https://t.me/{str(channel_id).replace('@', '')}"
+    return str(channel_id)
+
+
+def _build_status_link(settings):
+    status_cfg = USERS_DB.find_str_config(key='status_page_url')
+    if status_cfg and status_cfg[0].get('value'):
+        return status_cfg[0]['value']
+    return "https://t.me/velvetvpnstatus"
+
+
+def _get_subscriptions_for_user(telegram_id):
+    subs = []
+    for item in (utils.order_user_info(telegram_id) + utils.non_order_user_info(telegram_id)):
+        active = item['remaining_day'] > 0 and item['usage']['remaining_usage_GB'] > 0
+        subs.append({
+            'uuid': item['uuid'],
+            'sub_id': item['sub_id'],
+            'remaining_day': item['remaining_day'],
+            'active': active,
+            'usage': item['usage'],
+            'server_id': item.get('server_id'),
+        })
+    # Active first, then by remaining days descending.
+    subs.sort(key=lambda x: (x['active'], x['remaining_day']), reverse=True)
+    return subs
+
+
+def _get_server_api_url_by_uuid(uuid):
+    sub = utils.find_order_subscription_by_uuid(uuid)
+    if not sub:
+        return None
+    server = USERS_DB.find_server(id=sub['server_id'])
+    if not server:
+        return None
+    return server[0]['url'] + API_PATH
+
+
+def _extract_devices(raw_user):
+    if not raw_user:
+        return []
+
+    candidate_keys = ['ips', 'connected_ips', 'online_ips', 'devices', 'clients']
+    devices = []
+    for key in candidate_keys:
+        value = raw_user.get(key)
+        if not value:
+            continue
+        if isinstance(value, list):
+            for item in value:
+                if isinstance(item, dict):
+                    title = item.get('name') or item.get('device') or item.get('user_agent') or item.get('ip')
+                    os_name = item.get('os') or item.get('platform')
+                    app_name = item.get('app') or item.get('client')
+                    if title:
+                        parts = [title]
+                        if os_name:
+                            parts.append(os_name)
+                        if app_name:
+                            parts.append(app_name)
+                        devices.append(' | '.join(parts))
+                elif isinstance(item, str):
+                    devices.append(item)
+        elif isinstance(value, dict):
+            for dev_key, dev_val in value.items():
+                if isinstance(dev_val, dict):
+                    os_name = dev_val.get('os') or dev_val.get('platform') or ''
+                    app_name = dev_val.get('app') or dev_val.get('client') or ''
+                    devices.append(' | '.join([x for x in [str(dev_key), os_name, app_name] if x]))
+                else:
+                    devices.append(str(dev_key))
+
+    # Keep order and unique values.
+    return list(dict.fromkeys([d for d in devices if d]))
+
+
+def _send_velvet_main_menu(chat_id):
+    settings = utils.all_configs_settings()
+    wallet = USERS_DB.find_wallet(telegram_id=chat_id)
+    balance = 0
+    if wallet:
+        balance = int(wallet[0]['balance'])
+
+    msg = MESSAGES['VELVET_MAIN_MENU'].format(
+        bonus=utils.rial_to_toman(balance),
+        channel_link=_build_channel_link(settings),
+        status_link=_build_status_link(settings),
+    )
+    bot.send_message(chat_id, msg, reply_markup=main_menu_keyboard_markup())
+
+
+def _send_velvet_vpn_menu(chat_id):
+    subscriptions = _get_subscriptions_for_user(chat_id)
+    if not subscriptions:
+        bot.send_message(chat_id, MESSAGES['VELVET_NO_SUBS'], reply_markup=velvet_vpn_subscriptions_markup([]))
+        return
+    bot.send_message(chat_id, MESSAGES['VELVET_VPN_MENU'], reply_markup=velvet_vpn_subscriptions_markup(subscriptions))
+
+
+def _render_subscription_details(uuid):
+    sub_data = None
+    server_url = _get_server_api_url_by_uuid(uuid)
+    if not server_url:
+        return None
+
+    all_subs = utils.order_user_info(0) if False else []
+    del all_subs
+
+    # Search the selected subscription among all known subscriptions for current user is done in caller.
+    user_raw = api.find(server_url, uuid=uuid)
+    user_info = utils.users_to_dict([user_raw]) if user_raw else None
+    processed = utils.dict_process(server_url, user_info) if user_info else None
+    if processed:
+        sub_data = processed[0]
+
+    links = utils.sub_links(uuid)
+    if not links or not sub_data:
+        return None
+
+    sub_id = sub_data.get('sub_id') or (utils.find_order_subscription_by_uuid(uuid) or {}).get('id', '-')
+    remaining_day = sub_data.get('remaining_day', 0)
+    usage = sub_data.get('usage', {})
+    status_line = f"{usage.get('current_usage_GB', 0)} / {usage.get('usage_limit_GB', 0)} ГБ"
+
+    text = MESSAGES['VELVET_SUB_CARD'].format(
+        sub_id=sub_id,
+        plan_type='семейная (до 10 устройств)',
+        days=remaining_day,
+        sub_link=links['sub_link_auto'],
+    ) + f"\n\n📊Трафик: {status_line}"
+    return text, links['home_link']
 
 # Next Step Buy From Wallet - Confirm
 def buy_from_wallet_confirm(message: Message, plan):
@@ -1230,6 +1373,147 @@ def callback_query(call: CallbackQuery):
         elif value == 'lin':
             bot.send_message(call.message.chat.id, linux_msg, reply_markup=main_menu_keyboard_markup())
 
+    # ----------------------------------- Velvet UI Area -----------------------------------
+    elif key == "velvet_vpn_menu":
+        subscriptions = _get_subscriptions_for_user(call.message.chat.id)
+        text = MESSAGES['VELVET_VPN_MENU'] if subscriptions else MESSAGES['VELVET_NO_SUBS']
+        bot.edit_message_text(
+            text=text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=velvet_vpn_subscriptions_markup(subscriptions)
+        )
+
+    elif key == "velvet_sub_open":
+        details = _render_subscription_details(value)
+        if not details:
+            bot.answer_callback_query(call.id, MESSAGES['SUBSCRIPTION_NOT_FOUND'], show_alert=True)
+            return
+        text, home_link = details
+        bot.edit_message_text(
+            text=text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=velvet_subscription_actions_markup(value, home_link),
+            disable_web_page_preview=True,
+        )
+
+    elif key == "velvet_setup":
+        details = _render_subscription_details(value)
+        if not details:
+            bot.answer_callback_query(call.id, MESSAGES['SUBSCRIPTION_NOT_FOUND'], show_alert=True)
+            return
+        text, home_link = details
+        sub_id = text.split('#')[-1].split('\n')[0] if '#' in text else '-'
+        bot.edit_message_text(
+            text=MESSAGES['VELVET_SETUP_TEXT'].format(sub_id=sub_id),
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=velvet_setup_markup(value, home_link),
+            disable_web_page_preview=True,
+        )
+
+    elif key == "velvet_manual":
+        bot.send_message(
+            call.message.chat.id,
+            MESSAGES['REQUEST_SELECT_OS_MANUAL'],
+            reply_markup=users_bot_management_settings_panel_manual_markup()
+        )
+
+    elif key == "velvet_support":
+        bot.send_message(call.message.chat.id, MESSAGES['SEND_TICKET_TO_ADMIN_TEMPLATE'], reply_markup=send_ticket_to_admin())
+
+    elif key == "velvet_done":
+        bot.send_message(call.message.chat.id, "✅Отлично! Если понадобится помощь, нажмите «🆘Помощь».", reply_markup=main_menu_keyboard_markup())
+
+    elif key == "velvet_params":
+        bot.edit_message_text(
+            text=MESSAGES['USER_CONFIGS_LIST'],
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=sub_url_user_list_markup(value)
+        )
+
+    elif key == "velvet_devices":
+        page_str, uuid = value.split('|', 1)
+        page = max(0, int(page_str))
+        server_url = _get_server_api_url_by_uuid(uuid)
+        raw_user = api.find(server_url, uuid=uuid) if server_url else None
+        devices = _extract_devices(raw_user)
+        max_ips = 10
+        if raw_user and isinstance(raw_user.get('max_ips'), int) and raw_user['max_ips'] > 0:
+            max_ips = raw_user['max_ips']
+
+        if not devices:
+            lines = MESSAGES['VELVET_DEVICES_EMPTY']
+            total_pages = 1
+        else:
+            page_size = 5
+            total_pages = max(1, (len(devices) + page_size - 1) // page_size)
+            page = min(page, total_pages - 1)
+            page_items = devices[page * page_size:(page + 1) * page_size]
+            lines = "\n".join([f"{idx + 1}. {item}" for idx, item in enumerate(page_items, start=page * page_size)])
+
+        sub = utils.find_order_subscription_by_uuid(uuid)
+        sub_id = sub['id'] if sub else '-'
+        text = MESSAGES['VELVET_DEVICES_TEXT'].format(
+            sub_id=sub_id,
+            used=len(devices),
+            limit=max_ips,
+            devices=lines,
+        )
+        bot.edit_message_text(
+            text=text,
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=velvet_devices_markup(uuid, page, total_pages),
+        )
+
+    elif key == "velvet_lte":
+        bot.edit_message_text(
+            text=MESSAGES['VELVET_LTE_TEXT'],
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=velvet_lte_packages_markup(value)
+        )
+
+    elif key == "velvet_lte_buy":
+        uuid, gb, price = value.split('|')
+        bot.send_message(
+            call.message.chat.id,
+            MESSAGES['VELVET_LTE_BUY_TEXT'].format(gb=gb, price=price),
+            reply_markup=wallet_info_specific_markup(int(price) * 10)
+        )
+
+    elif key == "velvet_buy_sub":
+        buy_subscription(call.message)
+
+    elif key == "velvet_gift":
+        bot.send_message(call.message.chat.id, MESSAGES['VELVET_GIFTS_STUB'])
+
+    elif key == "velvet_bought_gifts":
+        bot.send_message(call.message.chat.id, MESSAGES['VELVET_GIFTS_STUB'])
+
+    elif key == "velvet_info":
+        settings = utils.all_configs_settings()
+        support_username = settings.get('support_username') or '@support'
+        channel_link = _build_channel_link(settings)
+        status_link = _build_status_link(settings)
+        if value == 'reviews':
+            bot.send_message(call.message.chat.id, MESSAGES['VELVET_INFO_REVIEWS'])
+        elif value == 'privacy':
+            bot.send_message(call.message.chat.id, MESSAGES['VELVET_INFO_PRIVACY'])
+        elif value == 'agreement':
+            bot.send_message(call.message.chat.id, MESSAGES['VELVET_INFO_AGREEMENT'])
+        elif value == 'pd':
+            bot.send_message(call.message.chat.id, MESSAGES['VELVET_INFO_PD'])
+        elif value == 'support':
+            bot.send_message(call.message.chat.id, MESSAGES['VELVET_INFO_SUPPORT'].format(support=support_username))
+        elif value == 'status':
+            bot.send_message(call.message.chat.id, MESSAGES['VELVET_INFO_STATUS'].format(status_link=status_link))
+        elif value == 'channel':
+            bot.send_message(call.message.chat.id, MESSAGES['VELVET_INFO_CHANNEL'].format(channel_link=channel_link))
+
 
 
 
@@ -1309,7 +1593,7 @@ def start_bot(message: Message):
     if USERS_DB.find_user(telegram_id=message.chat.id):
         edit_name= USERS_DB.edit_user(telegram_id=message.chat.id,full_name=message.from_user.full_name)
         edit_username = USERS_DB.edit_user(telegram_id=message.chat.id,username=message.from_user.username)
-        bot.send_message(message.chat.id, MESSAGES['WELCOME'], reply_markup=main_menu_keyboard_markup())
+        _send_velvet_main_menu(message.chat.id)
     else:
         created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         status = USERS_DB.add_user(telegram_id=message.chat.id,username=message.from_user.username, full_name=message.from_user.full_name, created_at=created_at)
@@ -1324,11 +1608,97 @@ def start_bot(message: Message):
                 bot.send_message(message.chat.id, f"{MESSAGES['UNKNOWN_ERROR']}:Wallet",
                                  reply_markup=main_menu_keyboard_markup())
                 return
-            bot.send_message(message.chat.id, MESSAGES['WELCOME'], reply_markup=main_menu_keyboard_markup())
+            _send_velvet_main_menu(message.chat.id)
 
     join_status = is_user_in_channel(message.chat.id)
     if not join_status:
         return
+
+
+@bot.message_handler(commands=['subscriptions'])
+def subscriptions_command(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    _send_velvet_vpn_menu(message.chat.id)
+
+
+@bot.message_handler(commands=['referral'])
+def referral_command(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    username = bot.get_me().username
+    ref_link = f"https://t.me/{username}?start=ref_{message.chat.id}"
+    bot.send_message(message.chat.id, MESSAGES['VELVET_REFERRAL_TEXT'].format(ref_link=ref_link), reply_markup=velvet_referral_markup(ref_link))
+
+
+@bot.message_handler(commands=['help'])
+def help_command(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    settings = utils.all_configs_settings()
+    bot.send_message(
+        message.chat.id,
+        MESSAGES['VELVET_HELP_TEXT'],
+        reply_markup=velvet_help_markup(settings.get('support_username'))
+    )
+
+
+@bot.message_handler(commands=['about'])
+def about_command(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    bot.send_message(message.chat.id, MESSAGES['VELVET_ABOUT_TEXT'], reply_markup=velvet_about_markup())
+
+
+@bot.message_handler(func=lambda message: message.text == KEY_MARKUP['MAIN_MENU'])
+def main_menu_button(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    _send_velvet_main_menu(message.chat.id)
+
+
+@bot.message_handler(func=lambda message: message.text == KEY_MARKUP['INVITE_FRIEND'])
+def invite_friend_button(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    username = bot.get_me().username
+    ref_link = f"https://t.me/{username}?start=ref_{message.chat.id}"
+    bot.send_message(message.chat.id, MESSAGES['VELVET_REFERRAL_TEXT'].format(ref_link=ref_link), reply_markup=velvet_referral_markup(ref_link))
+
+
+@bot.message_handler(func=lambda message: message.text == KEY_MARKUP['HELP_MENU'])
+def help_menu_button(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    settings = utils.all_configs_settings()
+    bot.send_message(
+        message.chat.id,
+        MESSAGES['VELVET_HELP_TEXT'],
+        reply_markup=velvet_help_markup(settings.get('support_username'))
+    )
+
+
+@bot.message_handler(func=lambda message: message.text == KEY_MARKUP['ABOUT_SERVICE'])
+def about_service_button(message: Message):
+    if is_user_banned(message.chat.id):
+        return
+    if not is_user_in_channel(message.chat.id):
+        return
+    bot.send_message(message.chat.id, MESSAGES['VELVET_ABOUT_TEXT'], reply_markup=velvet_about_markup())
 
 
 # If user is not in users table, request /start
@@ -1350,39 +1720,7 @@ def subscription_status(message: Message):
     join_status = is_user_in_channel(message.chat.id)
     if not join_status:
         return
-    non_order_subs = utils.non_order_user_info(message.chat.id)
-    order_subs = utils.order_user_info(message.chat.id)
-
-    if not non_order_subs and not order_subs:
-        bot.send_message(message.chat.id, MESSAGES['SUBSCRIPTION_NOT_FOUND'], reply_markup=main_menu_keyboard_markup())
-        return
-
-    if non_order_subs:
-        for non_order_sub in non_order_subs:
-            if non_order_sub:
-                server_id = non_order_sub['server_id']
-                server = USERS_DB.find_server(id=server_id)
-                if not server:
-                    bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'],
-                                    reply_markup=main_menu_keyboard_markup())
-                    return
-                server = server[0]
-                api_user_data = user_info_template(non_order_sub['sub_id'], server, non_order_sub, MESSAGES['INFO_USER'])
-                bot.send_message(message.chat.id, api_user_data,
-                                 reply_markup=user_info_non_sub_markup(non_order_sub['uuid']))
-    if order_subs:
-        for order_sub in order_subs:
-            if order_sub:
-                server_id = order_sub['server_id']
-                server = USERS_DB.find_server(id=server_id)
-                if not server:
-                    bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'],
-                                    reply_markup=main_menu_keyboard_markup())
-                    return
-                server = server[0]
-                api_user_data = user_info_template(order_sub['sub_id'], server, order_sub, MESSAGES['INFO_USER'])
-                bot.send_message(message.chat.id, api_user_data,
-                                 reply_markup=user_info_markup(order_sub['uuid']))
+    _send_velvet_vpn_menu(message.chat.id)
 
 
 # User Buy Subscription Message Handler
@@ -1572,15 +1910,26 @@ def cancel(message: Message):
 
 # *********************************** Main Area ***********************************
 def start():
-    # Bot Start Commands
+    try:
+        bot.remove_webhook()
+    except Exception as e:
+        logging.warning(f"Failed to remove user bot webhook: {e}")
+
     try:
         bot.set_my_commands([
             telebot.types.BotCommand("/start", BOT_COMMANDS['START']),
+            telebot.types.BotCommand("/subscriptions", BOT_COMMANDS['SUBSCRIPTIONS']),
+            telebot.types.BotCommand("/referral", BOT_COMMANDS['REFERRAL']),
+            telebot.types.BotCommand("/help", BOT_COMMANDS['HELP']),
+            telebot.types.BotCommand("/about", BOT_COMMANDS['ABOUT']),
         ])
     except telebot.apihelper.ApiTelegramException as e:
         if e.result.status_code == 401:
             logging.error("Invalid Telegram Bot Token!")
-            exit(1)
+            return
+        logging.warning(f"Failed to set user bot commands: {e}")
+    except Exception as e:
+        logging.warning(f"Failed to set user bot commands: {e}")
     # Welcome to Admin
     for admin in ADMINS_ID:
         try:
@@ -1589,4 +1938,9 @@ def start():
             logging.warning(f"Error in send message to admin {admin}: {e}")
     bot.enable_save_next_step_handlers()
     bot.load_next_step_handlers()
-    bot.infinity_polling()
+    while True:
+        try:
+            bot.infinity_polling()
+        except Exception as e:
+            logging.exception(f"User bot polling stopped: {e}")
+            time.sleep(5)

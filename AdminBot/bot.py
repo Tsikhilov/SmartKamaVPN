@@ -59,7 +59,10 @@ def yookassa_set_secret_key(message: Message):
 
 # Initialize Bot
 bot = telebot.TeleBot(TELEGRAM_TOKEN, parse_mode="HTML")
-bot.remove_webhook()
+try:
+    bot.remove_webhook()
+except Exception as e:
+    logging.warning(f"Failed to remove admin bot webhook during init: {e}")
 
 URL = 'url'
 selected_server = None
@@ -2942,7 +2945,11 @@ def debug(message: Message):
 # ----------------------------------- Main -----------------------------------
 # Start Bot
 def start():
-    # Bot Start Commands
+    try:
+        bot.remove_webhook()
+    except Exception as e:
+        logging.warning(f"Failed to remove admin bot webhook: {e}")
+
     try:
         bot.set_my_commands([
             telebot.types.BotCommand("/start", BOT_COMMANDS['START']),
@@ -2952,6 +2959,9 @@ def start():
         if e.result.status_code == 401:
             logging.error("Invalid Telegram Bot Token!")
             exit(1)
+        logging.warning(f"Failed to set admin bot commands: {e}")
+    except Exception as e:
+        logging.warning(f"Failed to set admin bot commands: {e}")
 
     # Welcome to Admin
     for admin in ADMINS_ID:
@@ -2962,4 +2972,9 @@ def start():
 
     bot.enable_save_next_step_handlers()
     bot.load_next_step_handlers()
-    bot.infinity_polling()
+    while True:
+        try:
+            bot.infinity_polling()
+        except Exception as e:
+            logging.exception(f"Admin bot polling stopped: {e}")
+            time.sleep(5)
