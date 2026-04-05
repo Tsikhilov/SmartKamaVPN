@@ -1,0 +1,39 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true,
+    "output": "/var/log/singbox-hy2.log"
+  },
+  "inbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "nl-hy2",
+      "listen": "0.0.0.0",
+      "listen_port": 8443,
+      "sniff": true,
+      "sniff_override_destination": false,
+      "obfs": {
+        "type": "salamander",
+        "password": "SmKm_Obs2026_s@l4m4nd3r!"
+      },
+      "users": [],
+      "ignore_client_bandwidth": false,
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+        "key_path": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem",
+        "alpn": ["h3"]
+      }
+    }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      { "ip_is_private": true, "outbound": "block" }
+    ],
+    "final": "direct"
+  }
+}

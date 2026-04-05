@@ -1,0 +1,38 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true,
+    "output": "/var/log/singbox-tuic.log"
+  },
+  "inbounds": [
+    {
+      "type": "tuic",
+      "tag": "nl-tuic5",
+      "listen": "0.0.0.0",
+      "listen_port": 9445,
+      "sniff": true,
+      "sniff_override_destination": false,
+      "users": [],
+      "congestion_control": "bbr",
+      "auth_timeout": "3s",
+      "zero_rtt_handshake": false,
+      "heartbeat": "10s",
+      "tls": {
+        "enabled": true,
+        "certificate_path": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+        "key_path": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem",
+        "alpn": ["h3"]
+      }
+    }
+  ],
+  "outbounds": [
+    { "type": "direct", "tag": "direct" },
+    { "type": "block", "tag": "block" }
+  ],
+  "route": {
+    "rules": [
+      { "ip_is_private": true, "outbound": "block" }
+    ],
+    "final": "direct"
+  }
+}
