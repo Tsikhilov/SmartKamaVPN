@@ -1,0 +1,51 @@
+server {
+    listen 2096 ssl;
+    server_name sub.smartkama.ru;
+
+    ssl_certificate     /etc/letsencrypt/live/sub.smartkama.ru/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/sub.smartkama.ru/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_ciphers         HIGH:!aNULL:!MD5;
+
+    location /s/ {
+        proxy_pass http://127.0.0.1:9101;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header User-Agent $http_user_agent;
+    }
+
+    location /sub/ {
+        proxy_pass http://127.0.0.1:9101;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header User-Agent $http_user_agent;
+    }
+
+    location ~ "^/([A-Za-z0-9]{8})$" {
+        rewrite "^/([A-Za-z0-9]{8})$" /sub/$1 last;
+    }
+
+    location /dashboard/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location /api/ {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+
+    location = / {
+        return 302 /dashboard/;
+    }
+}
