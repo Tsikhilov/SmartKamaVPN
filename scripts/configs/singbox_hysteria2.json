@@ -1,0 +1,38 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "hysteria2",
+      "tag": "nl-hy2-in",
+      "listen": "::",
+      "listen_port": 8444,
+      "up_mbps": 500,
+      "down_mbps": 500,
+      "obfs": {
+        "type": "salamander",
+        "password": "sK7mB2xNp4qR8vW3jL5kT9"
+      },
+      "users": [
+        {
+          "name": "default",
+          "password": "REPLACE_WITH_AUTH_PASSWORD"
+        }
+      ],
+      "tls": {
+        "enabled": true,
+        "server_name": "sub.smartkama.ru",
+        "certificate_path": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+        "key_path": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem"
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
+}

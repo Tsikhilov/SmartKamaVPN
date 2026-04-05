@@ -1,0 +1,36 @@
+{
+  "log": {
+    "level": "info",
+    "timestamp": true
+  },
+  "inbounds": [
+    {
+      "type": "tuic",
+      "tag": "nl-tuic-in",
+      "listen": "::",
+      "listen_port": 8445,
+      "users": [
+        {
+          "name": "default",
+          "uuid": "REPLACE_WITH_USER_UUID",
+          "password": "REPLACE_WITH_AUTH_PASSWORD"
+        }
+      ],
+      "congestion_control": "bbr",
+      "zero_rtt_handshake": true,
+      "tls": {
+        "enabled": true,
+        "server_name": "sub.smartkama.ru",
+        "certificate_path": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+        "key_path": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem",
+        "alpn": ["h3"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "type": "direct",
+      "tag": "direct"
+    }
+  ]
+}

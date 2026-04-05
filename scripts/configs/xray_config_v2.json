@@ -1,0 +1,313 @@
+{
+  "log": {
+    "loglevel": "warning"
+  },
+  "routing": {
+    "rules": [
+      {
+        "ip": ["geoip:private"],
+        "outboundTag": "BLOCK",
+        "type": "field"
+      }
+    ]
+  },
+  "inbounds": [
+    {
+      "tag": "nl-direct-ws",
+      "listen": "0.0.0.0",
+      "port": 443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "ws",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+              "keyFile": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem"
+            }
+          ],
+          "serverName": "sub.smartkama.ru",
+          "alpn": ["h2", "http/1.1"]
+        },
+        "wsSettings": {
+          "headers": {
+            "Host": "sub.smartkama.ru"
+          },
+          "path": "/fe790875b1d6"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "nl-reality-1",
+      "listen": "0.0.0.0",
+      "port": 9443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "vk.com:443",
+          "fingerprint": "chrome",
+          "privateKey": "YMvrrXDxs5nNuJObTdMFB8ttqWe8KGuUJJUyg7xfVF8",
+          "publicKey": "xFtfS45HEb_mYNr1ETW3XTL2D_FdryWahS-KYTNIZGg",
+          "serverNames": ["vk.com", "rambler.ru"],
+          "shortIds": ["a1c19887"],
+          "show": true,
+          "xver": 0
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "nl-reality-2",
+      "listen": "0.0.0.0",
+      "port": 10443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "ok.ru:443",
+          "fingerprint": "chrome",
+          "privateKey": "0D7OrJDXgLBRP_9lyjR7vorzVAXFUBdhJlBrxucLAUM",
+          "publicKey": "QBzNe-DWd08x9eaVjxJ2gtLxUw8DpfvMcVo6Tgy9SRc",
+          "serverNames": ["ok.ru", "dzen.ru"],
+          "shortIds": ["85be356f"],
+          "show": true,
+          "xver": 0
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "nl-reality-3",
+      "listen": "0.0.0.0",
+      "port": 11443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "gosuslugi.ru:443",
+          "fingerprint": "chrome",
+          "privateKey": "uBdQkd_CSCnnSO6PHbrYSsBGGUtLSfLb23kj1X_oJWs",
+          "publicKey": "7j3vEcLESooOJ8i29U_MSVCZTzH5LdaH8H8nmlx1mm4",
+          "serverNames": ["gosuslugi.ru", "avito.ru"],
+          "shortIds": ["d5706d02"],
+          "show": true,
+          "xver": 0
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "nl-reality-4",
+      "listen": "0.0.0.0",
+      "port": 12443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "reality",
+        "realitySettings": {
+          "dest": "www.microsoft.com:443",
+          "fingerprint": "chrome",
+          "privateKey": "0KNfdKpYSRgB2FvqLwg8gO7OPM6ovDwTa9FEahTBtW0",
+          "publicKey": "qRxqLvngKP-xfAGw6wzN6aDNuPfb1srwD6d5vtkAGAk",
+          "serverNames": ["www.microsoft.com", "login.microsoftonline.com"],
+          "shortIds": ["96099339"],
+          "show": true,
+          "xver": 0
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "nl-stealth-xhttp",
+      "listen": "0.0.0.0",
+      "port": 2053,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "xhttp",
+        "security": "tls",
+        "tlsSettings": {
+          "certificates": [
+            {
+              "certificateFile": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+              "keyFile": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem"
+            }
+          ],
+          "serverName": "sub.smartkama.ru",
+          "alpn": ["h2", "http/1.1"]
+        },
+        "xhttpSettings": {
+          "path": "/api/v2/xh-c4d8e2f7a91b",
+          "mode": "auto"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "nl-backup-grpc",
+      "listen": "0.0.0.0",
+      "port": 15443,
+      "protocol": "vless",
+      "settings": {
+        "clients": [],
+        "decryption": "none"
+      },
+      "streamSettings": {
+        "network": "grpc",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h2", "http/1.1"],
+          "certificates": [
+            {
+              "certificateFile": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+              "keyFile": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem"
+            }
+          ],
+          "serverName": "sub.smartkama.ru"
+        },
+        "grpcSettings": {
+          "multiMode": false,
+          "serviceName": "grpc"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    },
+    {
+      "tag": "nl-backup-trojan",
+      "listen": "0.0.0.0",
+      "port": 16443,
+      "protocol": "trojan",
+      "settings": {
+        "clients": []
+      },
+      "streamSettings": {
+        "network": "tcp",
+        "security": "tls",
+        "tlsSettings": {
+          "alpn": ["h2", "http/1.1"],
+          "certificates": [
+            {
+              "certificateFile": "/var/lib/marzban/certs/sub.smartkama.ru/fullchain.pem",
+              "keyFile": "/var/lib/marzban/certs/sub.smartkama.ru/privkey.pem"
+            }
+          ],
+          "serverName": "sub.smartkama.ru"
+        }
+      },
+      "sniffing": {
+        "enabled": true,
+        "destOverride": ["http", "tls", "quic"]
+      }
+    }
+  ],
+  "outbounds": [
+    {
+      "protocol": "freedom",
+      "tag": "DIRECT",
+      "settings": {
+        "domainStrategy": "AsIs"
+      }
+    },
+    {
+      "protocol": "blackhole",
+      "tag": "BLOCK"
+    },
+    {
+      "protocol": "wireguard",
+      "tag": "warp",
+      "settings": {
+        "mtu": 1420,
+        "secretKey": "uF8A6z8UmdkcujhmGwLiVGkmEIzkOgSDvePTSOQ7wk8=",
+        "address": [
+          "172.16.0.2/32",
+          "2606:4700:110:8949:631d:3e8e:ad1:fe52/128"
+        ],
+        "workers": 2,
+        "domainStrategy": "ForceIP",
+        "reserved": [185, 118, 62],
+        "peers": [
+          {
+            "publicKey": "bmXOC+F1FxEMF9dyiK2H5/1SUtzH0JuVo51h2wPfgyo=",
+            "allowedIPs": ["0.0.0.0/0", "::/0"],
+            "endpoint": "engage.cloudflareclient.com:2408",
+            "keepAlive": 0
+          }
+        ],
+        "noKernelTun": false
+      }
+    }
+  ],
+  "policy": {
+    "levels": {
+      "0": {
+        "statsUserDownlink": true,
+        "statsUserUplink": true
+      }
+    },
+    "system": {
+      "statsInboundDownlink": true,
+      "statsInboundUplink": true,
+      "statsOutboundDownlink": false,
+      "statsOutboundUplink": false
+    }
+  },
+  "api": {
+    "tag": "api",
+    "services": [
+      "HandlerService",
+      "LoggerService",
+      "StatsService"
+    ]
+  },
+  "stats": {}
+}
