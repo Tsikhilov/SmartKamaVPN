@@ -8,12 +8,12 @@ import string
 from io import BytesIO
 import re
 from datetime import datetime
-from urllib.parse import urlparse
+from urllib.parse import urlparse, urlsplit, urlunsplit, parse_qsl, urlencode
 from Database.dbManager import USERS_DB
 import psutil
 import qrcode
 import requests
-from config import PANEL_URL, BACKUP_LOC, CLIENT_TOKEN, USERS_DB_LOC,RECEIPTIONS_LOC,BOT_BACKUP_LOC, API_PATH,LOG_DIR
+from config import PANEL_URL, BACKUP_LOC, CLIENT_TOKEN, USERS_DB_LOC,RECEIPTIONS_LOC,BOT_BACKUP_LOC, API_PATH,LOG_DIR, THREEXUI_REALITY_PUBLIC_KEY
 import AdminBot.templates
 from Utils import api
 from version import __version__
@@ -160,7 +160,7 @@ def users_to_dict(users_dict):
                             'current_usage_GB': user['current_usage_GB'],
                             'last_reset_time': user['last_reset_time'], 'comment': user['comment'],
                             'telegram_id': user['telegram_id'],
-                            'added_by': user['added_by_uuid'], 'max_ips': None, 'enable': None})
+                            'added_by': user.get('added_by_uuid', user.get('added_by')), 'max_ips': None, 'enable': None})
     return users_array
 
 
@@ -214,15 +214,24 @@ def dict_process(url, users_dict, sub_id=None, server_id=None):
     BASE_URL = urlparse(url,).scheme + "://" + urlparse(url,).netloc
     panel_parts = [p for p in urlparse(url).path.split('/') if p]
     panel_path = panel_parts[0] if panel_parts else None
+    sub_domain = os.getenv("SMARTKAMA_SUB_DOMAIN", "sub.smartkama.ru").strip() or "sub.smartkama.ru"
+    sub_port = int(os.getenv("SMARTKAMA_SUB_PORT", "2096"))
     logging.info(f"Parse users page")
     if not users_dict:
         return False
     users_list = []
     for user in users_dict:
+        user_sub_id = str(user.get('sub_id') or '')[:8]
+        if not user_sub_id:
+            user_sub_id = str(user['uuid'])[:8]
+
         if panel_path:
-            user_link = f"{BASE_URL}/{panel_path}/{user['uuid']}/"
+            panel_user_link = f"{BASE_URL}/{panel_path}/{user['uuid']}/"
         else:
-            user_link = f"{BASE_URL}/{user['uuid']}/"
+            panel_user_link = f"{BASE_URL}/{user['uuid']}/"
+
+        # User-facing click-through should open subscription URL, not panel API endpoint.
+        user_link = f"https://{sub_domain}:{sub_port}/{user_sub_id}"
 
         users_list.append({
             "name": user['name'],
@@ -236,6 +245,7 @@ def dict_process(url, users_dict, sub_id=None, server_id=None):
             "last_connection": calculate_remaining_last_online(user['last_online']) if user['last_online'] else None,
             "uuid": user['uuid'],
             "link": user_link,
+            "panel_link": panel_user_link,
             "mode": user['mode'],
             "enable": user['enable'],
             "sub_id": sub_id,
@@ -260,8 +270,8 @@ def user_info(url, uuid):
 # Get sub links - return dict of sub links (3x-ui format)
 def sub_links(uuid, url=None):
     from config import THREEXUI_PANEL_URL
-    SUB_DOMAIN = "sub.smartkama.ru"
-    SUB_PORT = 2096
+    SUB_DOMAIN = os.getenv("SMARTKAMA_SUB_DOMAIN", "sub.smartkama.ru").strip() or "sub.smartkama.ru"
+    SUB_PORT = int(os.getenv("SMARTKAMA_SUB_PORT", "2096"))
 
     # Попробуем получить subId клиента через API
     try:
@@ -274,17 +284,24 @@ def sub_links(uuid, url=None):
     if not sub_id:
         sub_id = str(uuid)[:8]
 
-    sub_base = f"https://{SUB_DOMAIN}:{SUB_PORT}/{sub_id}"
+    # Raw endpoint used for import/parsing in bot internals.
+    sub_base_raw = f"https://{SUB_DOMAIN}:{SUB_PORT}/sub/{sub_id}"
+    # Public pretty link used in user-facing messages.
+    public_sub_link = f"https://{SUB_DOMAIN}:{SUB_PORT}/{sub_id}"
 
     sub = {
-        'sub_link':       sub_base,
-        'sub_link_b64':   sub_base,
-        'sub_link_auto':  sub_base,
-        'clash_configs':  f"{sub_base}?config=clash",
-        'hiddify_configs': sub_base,
-        'sing_box':       sub_base,
-        'sing_box_full':  sub_base,
-        'home_link':      sub_base,
+        'sub_link':         sub_base_raw,
+        'sub_link_b64':     sub_base_raw,
+        'sub_link_auto':    sub_base_raw,
+        'sub_link_raw':     sub_base_raw,
+        'sub_link_auto_raw': sub_base_raw,
+        'public_sub_link':  public_sub_link,
+        'clash_configs':    f"{sub_base_raw}?config=clash",
+        'hiddify_configs':  sub_base_raw,
+        'sing_box':         sub_base_raw,
+        'sing_box_full':    sub_base_raw,
+        'home_link':        sub_base_raw,
+        'public_home_link': public_sub_link,
     }
     return sub
 
@@ -296,7 +313,91 @@ def sub_parse(sub):
     if not res or res.status_code != 200:
         return False
 
-    urls = re.findall(r'(vless:\/\/[^\n]+)|(vmess:\/\/[^\n]+)|(trojan:\/\/[^\n]+)', res.text)
+    body = (res.text or "").strip()
+    if "vless://" not in body and "vmess://" not in body and "trojan://" not in body:
+        try:
+            import base64
+            padded = body + "=" * ((4 - len(body) % 4) % 4)
+            decoded = base64.b64decode(padded).decode("utf-8", errors="ignore")
+            if decoded:
+                body = decoded
+        except Exception:
+            pass
+
+    urls = re.findall(r'(vless:\/\/[^\n]+)|(vmess:\/\/[^\n]+)|(trojan:\/\/[^\n]+)', body)
+
+    def _normalize_vless_url(vless_url):
+        if not vless_url or not vless_url.startswith("vless://"):
+            return vless_url
+
+        base = vless_url
+        fragment = ""
+        if "#" in vless_url:
+            base, fragment = vless_url.split("#", 1)
+
+        parsed = urlsplit(base)
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+
+        if "encryption" not in params:
+            params["encryption"] = "none"
+
+        # Keep browser fingerprint explicit for all VLESS transports.
+        params["fp"] = "chrome"
+
+        if (params.get("security") or "").lower() == "reality":
+            if "pbk" not in params and THREEXUI_REALITY_PUBLIC_KEY:
+                params["pbk"] = THREEXUI_REALITY_PUBLIC_KEY
+
+        normalized = urlunsplit((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(params, doseq=True),
+            ""
+        ))
+        if fragment:
+            normalized = f"{normalized}#{fragment}"
+        return normalized
+
+    def _normalize_trojan_url(trojan_url):
+        if not trojan_url or not trojan_url.startswith("trojan://"):
+            return trojan_url
+
+        base = trojan_url
+        fragment = ""
+        if "#" in trojan_url:
+            base, fragment = trojan_url.split("#", 1)
+
+        parsed = urlsplit(base)
+        params = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        params["fp"] = "chrome"
+
+        normalized = urlunsplit((
+            parsed.scheme,
+            parsed.netloc,
+            parsed.path,
+            urlencode(params, doseq=True),
+            ""
+        ))
+        if fragment:
+            normalized = f"{normalized}#{fragment}"
+        return normalized
+
+    def _normalize_vmess_url(vmess_url):
+        if not vmess_url or not vmess_url.startswith("vmess://"):
+            return vmess_url
+        try:
+            payload = vmess_url.replace("vmess://", "", 1)
+            cfg = base64decoder(payload)
+            if not cfg:
+                return vmess_url
+            cfg["fp"] = "chrome"
+            encoded = base64.b64encode(
+                json.dumps(cfg, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+            ).decode("utf-8")
+            return f"vmess://{encoded}"
+        except Exception:
+            return vmess_url
 
     config_links = {
         'vless': [],
@@ -305,25 +406,36 @@ def sub_parse(sub):
     }
     for url in urls:
         if url[0]:
-            match = re.search(r'#(.+)$', url[0])
+            normalized_vless = _normalize_vless_url(url[0])
+            match = re.search(r'#(.+)$', normalized_vless)
             if match:
                 vless_title = match.group(1).replace("%20", " ")
-                config_links['vless'].append([url[0], vless_title])
+                config_links['vless'].append([normalized_vless, vless_title])
         elif url[1]:
-            config = url[1].replace("vmess://", "")
+            normalized_vmess = _normalize_vmess_url(url[1])
+            config = normalized_vmess.replace("vmess://", "")
             config_parsed = base64decoder(config)
             if config_parsed:
                 vmess_title = config_parsed['ps'].replace("%20", " ")
-                config_links['vmess'].append([url[1], vmess_title])
+                config_links['vmess'].append([normalized_vmess, vmess_title])
         elif url[2]:
-            match = re.search(r'#(.+)$', url[2])
+            normalized_trojan = _normalize_trojan_url(url[2])
+            match = re.search(r'#(.+)$', normalized_trojan)
             if match:
                 trojan_title = match.group(1).replace("%20", " ")
-                trojan_sni = re.search(r'sni=([^&]+)', url[2])
+                trojan_sni = re.search(r'sni=([^&]+)', normalized_trojan)
                 if trojan_sni:
                     if trojan_sni.group(1) == "fake_ip_for_sub_link":
                         continue
-                config_links['trojan'].append([url[2], match.group(1)])
+                config_links['trojan'].append([normalized_trojan, match.group(1)])
+
+    config_links['vless'].sort(
+        key=lambda item: (
+            0 if ("type=ws" in item[0] and "security=tls" in item[0]) else
+            1 if "security=reality" in item[0] else
+            2
+        )
+    )
         
     return config_links
 
@@ -621,6 +733,12 @@ def all_configs_settings():
         all_configs['yookassa_shop_id'] = yookassa_shop[0]['value']
     if yookassa_secret:
         all_configs['yookassa_secret_key'] = yookassa_secret[0]['value']
+
+    # Safe defaults for optional payment settings on legacy databases.
+    all_configs.setdefault('payment_method_card_enabled', 1)
+    all_configs.setdefault('payment_method_yookassa_enabled', 1)
+    all_configs.setdefault('payment_method_pally_enabled', 0)
+    all_configs.setdefault('pally_payment_url', None)
 
     return all_configs
 

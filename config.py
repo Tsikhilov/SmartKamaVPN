@@ -95,12 +95,25 @@ ADMINS_ID, TELEGRAM_TOKEN, CLIENT_TOKEN, PANEL_URL, LANG, PANEL_ADMIN_ID = None,
 HIDDIFY_API_KEY = None  # deprecated, оставлен для совместимости
 YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY = None, None
 
+# Active panel provider for API adapter: 3xui (default) | marzban
+PANEL_PROVIDER = os.getenv("SMARTKAMA_PANEL_PROVIDER", "3xui").strip().lower()
+
 # 3x-ui panel settings (могут быть переопределены через .env или БД)
 THREEXUI_USERNAME = os.getenv("THREEXUI_USERNAME", "admin")
 THREEXUI_PASSWORD = os.getenv("THREEXUI_PASSWORD", "SmartKama2026!")
 THREEXUI_PANEL_URL = os.getenv("THREEXUI_PANEL_URL", "https://sub.smartkama.ru:55445")
 THREEXUI_WEB_BASE_PATH = os.getenv("THREEXUI_WEB_BASE_PATH", "/902184284ee0d060")
 THREEXUI_INBOUND_ID = int(os.getenv("THREEXUI_INBOUND_ID", "1"))
+THREEXUI_INBOUND_IDS = os.getenv("THREEXUI_INBOUND_IDS", "")
+THREEXUI_REALITY_PUBLIC_KEY = os.getenv("THREEXUI_REALITY_PUBLIC_KEY", "")
+
+# Marzban settings (phase migration support)
+MARZBAN_PANEL_URL = os.getenv("MARZBAN_PANEL_URL", "")
+MARZBAN_USERNAME = os.getenv("MARZBAN_USERNAME", "")
+MARZBAN_PASSWORD = os.getenv("MARZBAN_PASSWORD", "")
+MARZBAN_ACCESS_TOKEN = os.getenv("MARZBAN_ACCESS_TOKEN", "")
+MARZBAN_TLS_VERIFY = os.getenv("MARZBAN_TLS_VERIFY", "false").strip().lower() in ("1", "true", "yes", "on")
+MARZBAN_INBOUND_TAGS = os.getenv("MARZBAN_INBOUND_TAGS", "")
 
 
 def set_config_variables(configs, server_url):
@@ -123,7 +136,9 @@ def set_config_variables(configs, server_url):
 
     global ADMINS_ID, TELEGRAM_TOKEN, PANEL_URL, LANG, PANEL_ADMIN_ID, CLIENT_TOKEN, HIDDIFY_API_KEY
     global YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
-    global THREEXUI_USERNAME, THREEXUI_PASSWORD, THREEXUI_PANEL_URL, THREEXUI_WEB_BASE_PATH, THREEXUI_INBOUND_ID
+    global PANEL_PROVIDER
+    global THREEXUI_USERNAME, THREEXUI_PASSWORD, THREEXUI_PANEL_URL, THREEXUI_WEB_BASE_PATH, THREEXUI_INBOUND_ID, THREEXUI_INBOUND_IDS, THREEXUI_REALITY_PUBLIC_KEY
+    global MARZBAN_PANEL_URL, MARZBAN_USERNAME, MARZBAN_PASSWORD, MARZBAN_ACCESS_TOKEN, MARZBAN_TLS_VERIFY, MARZBAN_INBOUND_TAGS
 
     if isinstance(raw_admin_ids, str) and raw_admin_ids.strip().startswith("["):
         ADMINS_ID = json.loads(raw_admin_ids)
@@ -143,14 +158,32 @@ def set_config_variables(configs, server_url):
     PANEL_ADMIN_ID = uuid_like[0] if uuid_like else None
     HIDDIFY_API_KEY = configs.get("hiddify_api_key") or os.getenv("SMARTKAMA_API_KEY") or PANEL_ADMIN_ID
 
+    provider_raw = (configs.get("panel_provider") or os.getenv("SMARTKAMA_PANEL_PROVIDER") or PANEL_PROVIDER or "3xui").strip().lower()
+    if provider_raw in ("3x-ui", "x-ui"):
+        provider_raw = "3xui"
+    if provider_raw not in ("3xui", "marzban"):
+        provider_raw = "3xui"
+    PANEL_PROVIDER = provider_raw
+
     # 3x-ui настройки (переопределяют значения по умолчанию если в БД/env заданы)
     THREEXUI_USERNAME = configs.get("threexui_username") or os.getenv("THREEXUI_USERNAME") or THREEXUI_USERNAME
     THREEXUI_PASSWORD = configs.get("threexui_password") or os.getenv("THREEXUI_PASSWORD") or THREEXUI_PASSWORD
     THREEXUI_PANEL_URL = configs.get("threexui_panel_url") or os.getenv("THREEXUI_PANEL_URL") or THREEXUI_PANEL_URL
     THREEXUI_WEB_BASE_PATH = configs.get("threexui_web_base_path") or os.getenv("THREEXUI_WEB_BASE_PATH") or THREEXUI_WEB_BASE_PATH
+    THREEXUI_INBOUND_IDS = (configs.get("threexui_inbound_ids") or os.getenv("THREEXUI_INBOUND_IDS") or THREEXUI_INBOUND_IDS or "").strip()
+    THREEXUI_REALITY_PUBLIC_KEY = (configs.get("threexui_reality_public_key") or os.getenv("THREEXUI_REALITY_PUBLIC_KEY") or THREEXUI_REALITY_PUBLIC_KEY or "").strip()
     _inbound_id = configs.get("threexui_inbound_id") or os.getenv("THREEXUI_INBOUND_ID")
     if _inbound_id:
         THREEXUI_INBOUND_ID = int(_inbound_id)
+
+    # Marzban settings (для поэтапной миграции)
+    MARZBAN_PANEL_URL = (configs.get("marzban_panel_url") or os.getenv("MARZBAN_PANEL_URL") or MARZBAN_PANEL_URL or "").strip()
+    MARZBAN_USERNAME = (configs.get("marzban_username") or os.getenv("MARZBAN_USERNAME") or MARZBAN_USERNAME or "").strip()
+    MARZBAN_PASSWORD = (configs.get("marzban_password") or os.getenv("MARZBAN_PASSWORD") or MARZBAN_PASSWORD or "").strip()
+    MARZBAN_ACCESS_TOKEN = (configs.get("marzban_access_token") or os.getenv("MARZBAN_ACCESS_TOKEN") or MARZBAN_ACCESS_TOKEN or "").strip()
+    MARZBAN_INBOUND_TAGS = (configs.get("marzban_inbound_tags") or os.getenv("MARZBAN_INBOUND_TAGS") or MARZBAN_INBOUND_TAGS or "").strip()
+    _marzban_tls_verify = (configs.get("marzban_tls_verify") or os.getenv("MARZBAN_TLS_VERIFY") or str(MARZBAN_TLS_VERIFY)).strip().lower()
+    MARZBAN_TLS_VERIFY = _marzban_tls_verify in ("1", "true", "yes", "on")
 
     # Load YooKassa settings
     YOOKASSA_SHOP_ID = configs.get("yookassa_shop_id")

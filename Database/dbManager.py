@@ -159,6 +159,18 @@ class UserDBManager:
             self.conn.commit()
             logging.info("YooKassa payments table created successfully!")
 
+            # Gift promo codes table
+            cur.execute("CREATE TABLE IF NOT EXISTS gift_promo_codes ("
+                        "code TEXT PRIMARY KEY,"
+                        "creator_telegram_id INTEGER NOT NULL,"
+                        "amount INTEGER NOT NULL,"
+                        "status TEXT NOT NULL DEFAULT 'new',"
+                        "created_at TEXT NOT NULL,"
+                        "redeemed_by INTEGER,"
+                        "redeemed_at TEXT)")
+            self.conn.commit()
+            logging.info("Gift promo codes table created successfully!")
+
             cur.execute("CREATE TABLE IF NOT EXISTS servers ("
                         "id INTEGER PRIMARY KEY AUTOINCREMENT,"
                         "url TEXT NOT NULL,"
@@ -761,6 +773,9 @@ class UserDBManager:
         
         self.add_bool_config("renewal_subscription_status", True)
         self.add_bool_config("buy_subscription_status", True)
+        self.add_bool_config("payment_method_card_enabled", True)
+        self.add_bool_config("payment_method_yookassa_enabled", True)
+        self.add_bool_config("payment_method_pally_enabled", False)
 
 
         self.add_bool_config("visible_conf_dir", False)
@@ -790,6 +805,7 @@ class UserDBManager:
         self.add_str_config("msg_manual_linux", None)
 
         self.add_str_config("msg_faq", None)
+        self.add_str_config("pally_payment_url", None)
 
         self.add_int_config("min_deposit_amount", 10000)
 
@@ -1046,6 +1062,64 @@ class UserDBManager:
             logging.error(f"Error while selecting all YooKassa payments \n Error:{e}")
             return None
 
+    # Gift Promo Code Methods
+    def add_gift_promo_code(self, code, creator_telegram_id, amount, created_at):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                "INSERT INTO gift_promo_codes(code, creator_telegram_id, amount, status, created_at) VALUES(?,?,?,?,?)",
+                (code, creator_telegram_id, amount, 'new', created_at))
+            self.conn.commit()
+            logging.info(f"Gift promo code [{code}] added successfully!")
+            return True
+        except Error as e:
+            logging.error(f"Error while adding gift promo code [{code}] \n Error: {e}")
+            return False
+
+    def find_gift_promo_code(self, **kwargs):
+        if len(kwargs) != 1:
+            logging.warning("You can only use one key to find gift promo code!")
+            return None
+        rows = []
+        cur = self.conn.cursor()
+        try:
+            for key, value in kwargs.items():
+                cur.execute(f"SELECT * FROM gift_promo_codes WHERE {key}=?", (value,))
+                rows = cur.fetchall()
+            if len(rows) == 0:
+                logging.info(f"Gift promo code {kwargs} not found!")
+                return None
+            rows = [dict(zip([key[0] for key in cur.description], row)) for row in rows]
+            return rows
+        except Error as e:
+            logging.error(f"Error while finding gift promo code {kwargs} \n Error:{e}")
+            return None
+
+    def redeem_gift_promo_code(self, code, redeemed_by, redeemed_at):
+        cur = self.conn.cursor()
+        try:
+            cur.execute(
+                "UPDATE gift_promo_codes SET status=?, redeemed_by=?, redeemed_at=? WHERE code=?",
+                ('redeemed', redeemed_by, redeemed_at, code),
+            )
+            self.conn.commit()
+            logging.info(f"Gift promo code [{code}] redeemed successfully!")
+            return True
+        except Error as e:
+            logging.error(f"Error while redeeming gift promo code [{code}] \n Error: {e}")
+            return False
+
+    def select_gift_promo_codes(self):
+        cur = self.conn.cursor()
+        try:
+            cur.execute("SELECT * FROM gift_promo_codes ORDER BY created_at DESC")
+            rows = cur.fetchall()
+            rows = [dict(zip([key[0] for key in cur.description], row)) for row in rows]
+            return rows
+        except Error as e:
+            logging.error(f"Error while selecting all gift promo codes \n Error:{e}")
+            return None
+
     def backup_to_json(self, backup_dir):
         try:
 
@@ -1053,7 +1127,8 @@ class UserDBManager:
 
             # List of tables to backup
             tables = ['users', 'plans', 'orders', 'order_subscriptions', 'non_order_subscriptions',
-                      'str_config', 'int_config', 'bool_config', 'wallet', 'payments', 'servers', 'yookassa_payments']
+                      'str_config', 'int_config', 'bool_config', 'wallet', 'payments', 'servers', 'yookassa_payments',
+                      'gift_promo_codes']
 
             for table in tables:
                 cur = self.conn.cursor()
