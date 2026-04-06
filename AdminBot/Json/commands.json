@@ -3,6 +3,10 @@
         "START": "start",
         "DEBUG": "debug"
     },
+    "RU": {
+        "START": "старт",
+        "DEBUG": "дебаг"
+    },
     "FA": {
         "START": "شروع",
         "DEBUG": "اشکال زدایی"
