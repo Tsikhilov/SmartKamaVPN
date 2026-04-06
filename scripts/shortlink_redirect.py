@@ -1168,7 +1168,7 @@ def _build_singbox_config(proxy_lines, operator=None):
     selector = {
         "type": "selector",
         "tag": "proxy",
-        "outbounds": ["auto"] + list(proxy_tags),
+        "outbounds": ["auto", "direct"] + list(proxy_tags),
         "default": "auto",
     }
 
