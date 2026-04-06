@@ -215,7 +215,7 @@ def dict_process(url, users_dict, sub_id=None, server_id=None):
     panel_parts = [p for p in urlparse(url).path.split('/') if p]
     panel_path = panel_parts[0] if panel_parts else None
     sub_domain = os.getenv("SMARTKAMA_SUB_DOMAIN", "sub.smartkama.ru").strip() or "sub.smartkama.ru"
-    sub_port = int(os.getenv("SMARTKAMA_SUB_PORT", "2096"))
+    sub_port = int(os.getenv("SMARTKAMA_SUB_PORT", "443"))
     logging.info(f"Parse users page")
     if not users_dict:
         return False
@@ -231,7 +231,8 @@ def dict_process(url, users_dict, sub_id=None, server_id=None):
             panel_user_link = f"{BASE_URL}/{user['uuid']}/"
 
         # User-facing click-through should open subscription URL, not panel API endpoint.
-        user_link = f"https://{sub_domain}:{sub_port}/{user_sub_id}"
+        _sub_port_sfx = f":{sub_port}" if sub_port not in (443, 0) else ""
+        user_link = f"https://{sub_domain}{_sub_port_sfx}/{user_sub_id}"
 
         users_list.append({
             "name": user['name'],
@@ -271,7 +272,8 @@ def user_info(url, uuid):
 def sub_links(uuid, url=None):
     from config import THREEXUI_PANEL_URL
     SUB_DOMAIN = os.getenv("SMARTKAMA_SUB_DOMAIN", "sub.smartkama.ru").strip() or "sub.smartkama.ru"
-    SUB_PORT = int(os.getenv("SMARTKAMA_SUB_PORT", "2096"))
+    SUB_PORT = int(os.getenv("SMARTKAMA_SUB_PORT", "443"))
+    _port_sfx = f":{SUB_PORT}" if SUB_PORT not in (443, 0) else ""
 
     # Попробуем получить subId клиента через API
     try:
@@ -285,9 +287,9 @@ def sub_links(uuid, url=None):
         sub_id = str(uuid)[:8]
 
     # Raw endpoint used for import/parsing in bot internals.
-    sub_base_raw = f"https://{SUB_DOMAIN}:{SUB_PORT}/sub/{sub_id}"
+    sub_base_raw = f"https://{SUB_DOMAIN}{_port_sfx}/sub/{sub_id}"
     # Public pretty link used in user-facing messages.
-    public_sub_link = f"https://{SUB_DOMAIN}:{SUB_PORT}/{sub_id}"
+    public_sub_link = f"https://{SUB_DOMAIN}{_port_sfx}/{sub_id}"
 
     sub = {
         'sub_link':         sub_base_raw,
