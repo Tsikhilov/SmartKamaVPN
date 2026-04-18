@@ -102,7 +102,17 @@ function Publish-ProdBot {
     Copy-ToProd "scripts/server_signal_proxy.py" "/opt/SmartKamaVPN/scripts/server_signal_proxy.py"
     Copy-ToProd "Database/dbManager.py" "/opt/SmartKamaVPN/Database/dbManager.py"
     Copy-ToProd "Cronjob/reminder.py" "/opt/SmartKamaVPN/Cronjob/reminder.py"
+    Copy-ToProd "Cronjob/backup.py" "/opt/SmartKamaVPN/Cronjob/backup.py"
+    Copy-ToProd "Cronjob/backupBot.py" "/opt/SmartKamaVPN/Cronjob/backupBot.py"
     Copy-ToProd "Cronjob/payment_check.py" "/opt/SmartKamaVPN/Cronjob/payment_check.py"
+    Copy-ToProd "Cronjob/auto_cleanup.py" "/opt/SmartKamaVPN/Cronjob/auto_cleanup.py"
+    Copy-ToProd "Cronjob/status_channel.py" "/opt/SmartKamaVPN/Cronjob/status_channel.py"
+    Copy-ToProd "Cronjob/traffic_anomaly.py" "/opt/SmartKamaVPN/Cronjob/traffic_anomaly.py"
+    Copy-ToProd "UserBot/templates.py" "/opt/SmartKamaVPN/UserBot/templates.py"
+    Copy-ToProd "Utils/serverInfo.py" "/opt/SmartKamaVPN/Utils/serverInfo.py"
+    Copy-ToProd "scripts/server_install_cron.py" "/opt/SmartKamaVPN/scripts/server_install_cron.py"
+    Copy-ToProd "scripts/server_tune_network.py" "/opt/SmartKamaVPN/scripts/server_tune_network.py"
+    Copy-ToProd "scripts/server_apply_nl_profiles.py" "/opt/SmartKamaVPN/scripts/server_apply_nl_profiles.py"
     Copy-ToProd "Utils/cryptopay.py" "/opt/SmartKamaVPN/Utils/cryptopay.py"
     Copy-ToProd "Utils/yookassa.py" "/opt/SmartKamaVPN/Utils/yookassa.py"
     Copy-ToProd "crontab.py" "/opt/SmartKamaVPN/crontab.py"
@@ -112,7 +122,7 @@ function Publish-ProdBot {
     $cmd = @'
 set -e;
 cd /opt/SmartKamaVPN;
-.venv/bin/python -m py_compile UserBot/bot.py UserBot/markups.py Utils/api.py Utils/marzban_api.py Utils/cryptopay.py Database/dbManager.py config.py crontab.py Cronjob/payment_check.py scripts/shortlink_redirect.py scripts/server_telegram_selfcheck.py scripts/check_userbot_callback_coverage.py scripts/selfcheck_api.py scripts/selfcheck_marzban_api.py scripts/server_set_panel_provider.py;
+.venv/bin/python -m py_compile UserBot/bot.py UserBot/markups.py Utils/api.py Utils/marzban_api.py Utils/cryptopay.py Utils/serverInfo.py Database/dbManager.py config.py crontab.py Cronjob/payment_check.py Cronjob/auto_cleanup.py Cronjob/status_channel.py Cronjob/traffic_anomaly.py scripts/shortlink_redirect.py scripts/server_telegram_selfcheck.py scripts/check_userbot_callback_coverage.py scripts/selfcheck_api.py scripts/selfcheck_marzban_api.py scripts/server_set_panel_provider.py scripts/server_install_cron.py;
 .venv/bin/python scripts/check_userbot_callback_coverage.py --markups UserBot/markups.py --bot UserBot/bot.py;
 .venv/bin/python -c 'import config, subprocess, sys; p=str(getattr(config,"PANEL_PROVIDER","3xui")).strip().lower(); print("selfcheck_provider=" + p); s=["scripts/selfcheck_marzban_api.py"] if p=="marzban" else ["scripts/selfcheck_api.py"]; raise SystemExit(subprocess.call([sys.executable] + s))';
 systemctl restart smartkamavpn smartkama-shortlink;
