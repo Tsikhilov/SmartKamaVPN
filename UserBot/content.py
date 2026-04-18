@@ -16,7 +16,7 @@ with open(os.path.join(os.path.dirname(__file__), FOLDER, MSG_FILE), encoding='u
 # Use RU as default, fallback to EN if RU not available
 MESSAGES = MESSAGES_ALL.get(LANG, MESSAGES_ALL.get('RU', MESSAGES_ALL.get('EN', {})))
 if settings.get('msg_user_start'):
-    MESSAGES['WELCOME'] = settings['msg_user_start']
+    MESSAGES['WELCOME'] = settings.get('msg_user_start')
 
 # Load buttons with fallback to RU
 with open(os.path.join(os.path.dirname(__file__), FOLDER, BTN_FILE), encoding='utf-8') as f:

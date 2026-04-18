@@ -264,8 +264,8 @@ def renewal_unvalable_template(settings):
         return f"""
 🛑در حال حاضر شما امکان تمدید اشتراک خود را ندارید.
 جهت تمدید اشتراک باید یکی از شروط زیر برقرار باشد:
-1- کمتر از {settings['advanced_renewal_days']} روز تا اتمام اشتراک شما باقی مانده باشد.
-2- حجم باقی مانده اشتراک شما کمتر از {settings['advanced_renewal_usage']} گیگابایت باشد.
+1- کمتر از {settings.get('advanced_renewal_days', '?')} روز تا اتمام اشتراک شما باقی مانده باشد.
+2- حجم باقی مانده اشتراک شما کمتر از {settings.get('advanced_renewal_usage', '?')} گیگابایت باشد.
 """
     else:
         return (
