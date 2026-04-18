@@ -2,6 +2,7 @@
 import base64
 import html
 import json
+import logging
 import os
 import re
 import ssl
@@ -26,6 +27,387 @@ _REALITY_PBK_CACHE = None
 _REALITY_FP_CACHE = None
 _REALITY_PORT_CACHE = None
 _EXPORT_HOST_CACHE = None
+
+
+# -------------------- Device Tracking --------------------
+import datetime as _dt
+
+_ANDROID_TV_MARKERS = (
+    "android tv",
+    "google tv",
+    "googletv",
+    "smart tv",
+    "smarttv",
+    "apple tv",
+    "bravia",
+    "shield",
+    "chromecast",
+    "mi box",
+    "mibox",
+)
+
+# User-Agent substrings that indicate automated tools, bots, or server-side fetchers.
+# Connections from these should NOT be counted as user devices.
+_BOT_UA_MARKERS = (
+    "curl/",
+    "python-requests/",
+    "python-httpx/",
+    "python/",
+    "telegrambot",
+    "go-http-client/",
+    "wget/",
+    "libcurl/",
+    "okhttp/",
+    "java/",
+    "axios/",
+    "node-fetch/",
+    "node.js",
+    "ruby",
+    "php/",
+    "perl/",
+    "lua-resty",
+    "monitoring",
+    "uptime",
+    "healthcheck",
+)
+
+
+def _is_bot_user_agent(ua: str) -> bool:
+    """Return True if the User-Agent belongs to an automated tool/bot, not a real user device."""
+    if not ua:
+        return False
+    ua_lower = ua.lower()
+    return any(marker in ua_lower for marker in _BOT_UA_MARKERS)
+
+
+def _normalize_device_type(value: str) -> str:
+    normalized = str(value or "").strip().lower()
+    if normalized in {"tv", "android tv", "android_tv", "smart tv", "apple tv"}:
+        return "tv"
+    if normalized in {"phone", "android", "ios", "iphone"}:
+        return "phone"
+    return "computer"
+
+
+def _is_android_tv_user_agent(ua: str) -> bool:
+    if any(marker in ua for marker in _ANDROID_TV_MARKERS):
+        return True
+    return bool(re.search(r"\baft[a-z0-9_-]*\b", ua))
+
+def _classify_device(user_agent: str) -> tuple:
+    """Classify device from User-Agent string.
+    Returns (device_type, device_name, client_app).
+    device_type: 'phone', 'computer', 'tv'
+    """
+    ua = (user_agent or "").lower()
+    client_app = "unknown"
+    device_name = ""
+    device_type = "computer"
+
+    # Detect VPN client app
+    if "happ" in ua or "hiddify" in ua:
+        client_app = "Hiddify"
+    elif "v2raytun" in ua or "v2ray-tun" in ua:
+        client_app = "V2RayTun"
+    elif "v2ray" in ua:
+        client_app = "V2Ray"
+    elif "sing-box" in ua or "singbox" in ua:
+        client_app = "sing-box"
+    elif "nekobox" in ua or "nekoray" in ua:
+        client_app = "NekoBox"
+    elif "clash" in ua or "mihomo" in ua:
+        client_app = "Clash"
+    elif "streisand" in ua:
+        client_app = "Streisand"
+    elif "shadowrocket" in ua:
+        client_app = "Shadowrocket"
+    elif "quantumult" in ua:
+        client_app = "Quantumult"
+    elif "surge" in ua:
+        client_app = "Surge"
+    elif "stash" in ua:
+        client_app = "Stash"
+
+    # Detect device type and name
+    if "ipad" in ua:
+        device_type = "computer"
+        device_name = "iPad"
+    elif "iphone" in ua:
+        device_type = "phone"
+        device_name = "iPhone"
+    elif _is_android_tv_user_agent(ua):
+        device_type = "tv"
+        if "apple tv" in ua:
+            device_name = "Apple TV"
+        elif "bravia" in ua:
+            device_name = "Sony TV"
+        else:
+            device_name = "Android TV"
+    elif "android" in ua:
+        if "tablet" in ua or "sm-t" in ua or "gt-p" in ua:
+            device_type = "computer"
+            device_name = "Android Tablet"
+        else:
+            device_type = "phone"
+            device_name = "Android"
+            # Try to extract model
+            m = re.search(r"android[^;]*;\s*([^)]+)", ua)
+            if m:
+                model = m.group(1).strip().split(" build")[0].strip()
+                if model and len(model) < 40:
+                    device_name = model
+    elif "windows" in ua:
+        device_type = "computer"
+        device_name = "Windows PC"
+    elif "macintosh" in ua or "mac os" in ua:
+        device_type = "computer"
+        device_name = "Mac"
+    elif "linux" in ua:
+        device_type = "computer"
+        device_name = "Linux PC"
+
+    return device_type, device_name, client_app
+
+
+def _resolve_sub_uuid(sub_segment: str) -> str:
+    """Resolve a subscription segment (short sub_id, marzban token, etc.) to UUID from order_subscriptions.
+
+    Tries:
+      1. Exact UUID match in order_subscriptions
+      2. UUID starts with sub_segment (short prefix like '01dcf49b')
+      3. id (numeric) match
+      4. Marzban API: find user whose subscription_url contains the token → extract UUID
+    Returns UUID string or the original sub_segment as fallback.
+    """
+    if not sub_segment:
+        return sub_segment
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            # 1. Exact UUID
+            row = conn.execute(
+                "SELECT uuid FROM order_subscriptions WHERE uuid = ? LIMIT 1",
+                (sub_segment,)
+            ).fetchone()
+            if row:
+                return row[0]
+            # 2. UUID prefix match
+            row = conn.execute(
+                "SELECT uuid FROM order_subscriptions WHERE uuid LIKE ? LIMIT 1",
+                (sub_segment + '%',)
+            ).fetchone()
+            if row:
+                return row[0]
+            # 3. Numeric id match
+            if sub_segment.isdigit():
+                row = conn.execute(
+                    "SELECT uuid FROM order_subscriptions WHERE id = ? LIMIT 1",
+                    (int(sub_segment),)
+                ).fetchone()
+                if row:
+                    return row[0]
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    # 4. Marzban API: resolve subscription token to user UUID
+    try:
+        resolved = _resolve_uuid_via_marzban(sub_segment)
+        if resolved:
+            return resolved
+    except Exception:
+        pass
+    return sub_segment
+
+
+def _resolve_uuid_via_marzban(sub_token: str) -> str:
+    """Query Marzban API to find the user for this subscription token,
+    then match their UUID(s) against order_subscriptions."""
+    token = _marzban_api_token()
+    if not token:
+        return ""
+    panel_url = os.getenv("MARZBAN_PANEL_URL", "http://127.0.0.1:8000").rstrip("/")
+    try:
+        # Marzban tokens are base64: {username},{timestamp}{random}
+        # Decode to extract username for reliable lookup
+        username = _decode_marzban_sub_token_username(sub_token)
+        if not username:
+            return ""
+        req = urllib.request.Request(
+            f"{panel_url}/api/users?search={urllib.parse.quote(username)}&limit=5",
+            headers={"Authorization": f"Bearer {token}"},
+            method="GET",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read())
+            for user in data.get("users", []):
+                if str(user.get("username") or "") != username:
+                    continue
+                # Collect all candidate UUIDs from this user
+                candidates = []
+                proxies = user.get("proxies") or {}
+                for proto_cfg in proxies.values():
+                    uid = str(proto_cfg.get("id") or "").strip()
+                    if uid and len(uid) >= 32:
+                        candidates.append(uid)
+                # Also try UUID suffix from username (e.g. "test-01dcf49b")
+                parts = username.rsplit("-", 1)
+                if len(parts) == 2 and len(parts[1]) >= 8:
+                    candidates.append(parts[1])
+                # Match candidates against order_subscriptions
+                conn = sqlite3.connect(DB_PATH)
+                try:
+                    for c in candidates:
+                        row = conn.execute(
+                            "SELECT uuid FROM order_subscriptions WHERE uuid = ? LIMIT 1", (c,)
+                        ).fetchone()
+                        if row:
+                            return row[0]
+                        row = conn.execute(
+                            "SELECT uuid FROM order_subscriptions WHERE uuid LIKE ? LIMIT 1", (c + '%',)
+                        ).fetchone()
+                        if row:
+                            return row[0]
+                finally:
+                    conn.close()
+                # Fallback: return first proxy UUID
+                if candidates:
+                    return candidates[0]
+    except Exception:
+        pass
+    return ""
+
+
+def _decode_marzban_sub_token_username(sub_token: str) -> str:
+    """Extract Marzban username from a subscription token (base64-encoded '{username},{ts}{rand}')."""
+    import base64
+    try:
+        padded = sub_token + '=' * (-len(sub_token) % 4)
+        decoded = base64.urlsafe_b64decode(padded).decode('utf-8', errors='replace')
+        if ',' in decoded:
+            return decoded.split(',', 1)[0].strip()
+    except Exception:
+        pass
+    return ""
+
+
+def _track_device_for_sub(path: str, headers, client_address, resolved_target_url=None):
+    """Track device connection when subscription is fetched."""
+    try:
+        ua = headers.get("User-Agent") or ""
+        if not ua or len(ua) < 3:
+            return
+        if _is_bot_user_agent(ua):
+            return
+
+        # Extract sub segment from path or resolved target URL
+        sub_segment = ""
+        # For /s/ paths, use the resolved target_url (which contains the actual /sub/ path)
+        source = resolved_target_url or path
+        if "/sub/" in source:
+            sub_segment = source.split("/sub/", 1)[1].strip("/").split("?")[0].split("/")[0]
+        elif "/s/" in source:
+            sub_segment = source.split("/s/", 1)[1].strip("/").split("?")[0].split("/")[0]
+        if not sub_segment:
+            return
+
+        # Resolve sub_segment to actual UUID
+        sub_uuid = _resolve_sub_uuid(sub_segment)
+
+        device_type, device_name, client_app = _classify_device(ua)
+        client_ip = client_address[0] if client_address else None
+
+        now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            conn.execute(
+                "INSERT INTO device_connections (sub_uuid, user_agent, device_type, device_name, client_app, client_ip, first_seen, last_seen) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                "ON CONFLICT(sub_uuid, user_agent) DO UPDATE SET "
+                "last_seen=?, client_ip=?, device_type=?, device_name=?, client_app=?",
+                (sub_uuid, ua[:500], device_type, device_name, client_app, client_ip, now, now,
+                 now, client_ip, device_type, device_name, client_app)
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    except Exception:
+        pass  # Never break subscription delivery for tracking
+
+
+def _get_device_limit_for_sub(sub_uuid: str) -> int:
+    """Resolve the max device count for a subscription from order→plan chain.
+
+    Returns total device limit (4 for individual / 8 for family) or 4 as default.
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            row = conn.execute(
+                "SELECT o.plan_id FROM order_subscriptions os "
+                "JOIN orders o ON o.id = os.order_id "
+                "WHERE os.uuid = ? LIMIT 1",
+                (sub_uuid,)
+            ).fetchone()
+            if row:
+                plan_id = row[0]
+                if plan_id and 2200 < int(plan_id) < 2300:
+                    return 8  # family: 5 phones + 3 desktop = 8
+                plan_row = conn.execute(
+                    "SELECT description FROM plans WHERE id = ? LIMIT 1",
+                    (plan_id,)
+                ).fetchone()
+                if plan_row:
+                    desc = str(plan_row[0] or '').lower()
+                    if '5 устрой' in desc or 'семейн' in desc or 'family' in desc:
+                        return 8
+        finally:
+            conn.close()
+    except Exception:
+        pass
+    return 4  # individual: 2 phones + 2 desktop = 4
+
+
+def _count_devices_for_sub(sub_uuid: str) -> int:
+    """Count tracked devices for a subscription UUID."""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM device_connections WHERE sub_uuid = ?",
+                (sub_uuid,)
+            ).fetchone()
+            return row[0] if row else 0
+        finally:
+            conn.close()
+    except Exception:
+        return 0
+
+
+def _is_device_over_limit(sub_uuid: str) -> bool:
+    """Check whether the subscription has exceeded its device limit."""
+    if not sub_uuid or len(sub_uuid) < 8:
+        return False
+    limit = _get_device_limit_for_sub(sub_uuid)
+    count = _count_devices_for_sub(sub_uuid)
+    return count > limit
+
+
+_DEVICE_BLOCKED_PAYLOAD = (
+    "# SmartKamaVPN — превышен лимит устройств\n"
+    "# Зайдите в бот и удалите лишние устройства\n"
+    "# в разделе Подписки → Устройства\n"
+).encode("utf-8")
+
+_DEVICE_BLOCKED_SINGBOX = {
+    "log": {"level": "warn"},
+    "outbounds": [
+        {"type": "direct", "tag": "direct"},
+        {"type": "block", "tag": "block"},
+    ],
+    "route": {"final": "block"},
+}
+
 
 # Operator-based profile ordering.
 # Keys: operator slug → preferred order of transport categories.
@@ -245,6 +627,360 @@ def build_install_page(target_url, token, meta):
             }}, 120);
         }})();
     </script>
+</body>
+</html>
+""".encode("utf-8")
+
+
+def _fetch_sub_userinfo(sub_url):
+    """Fetch subscription-userinfo header from upstream to get usage data."""
+    try:
+        payload, _, headers = proxy_subscription_source(sub_url)
+        if payload is None:
+            return None
+        info_str = (headers or {}).get("subscription-userinfo", "")
+        if not info_str:
+            return None
+        info = {}
+        for part in info_str.split(";"):
+            part = part.strip()
+            if "=" in part:
+                k, v = part.split("=", 1)
+                info[k.strip()] = v.strip()
+        return info
+    except Exception:
+        return None
+
+
+def _get_devices_for_sub(sub_id):
+    """Get device connections for a subscription from SQLite."""
+    try:
+        resolved = _resolve_sub_uuid(sub_id)
+        conn = sqlite3.connect(DB_PATH)
+        rows = conn.execute(
+            "SELECT device_type, device_name, client_app, last_seen FROM device_connections WHERE sub_uuid=? ORDER BY last_seen DESC",
+            (resolved,),
+        ).fetchall()
+        conn.close()
+        return [{"type": _normalize_device_type(r[0]), "name": r[1], "app": r[2], "last_seen": r[3]} for r in rows]
+    except Exception:
+        return []
+
+
+def build_subscription_page(sub_id, sub_url, meta=None, devices=None):
+    """Build a rich HTML subscription info page with SmartKamaVPN branding."""
+    encoded = quote(sub_url, safe="")
+    escaped_sub_url = html.escape(sub_url, quote=True)
+
+    # Deeplinks for all supported apps
+    apps = [
+        {"name": "Hiddify Next", "scheme": "hiddify", "desc": "Рекомендуемый", "platforms": "iOS · Android · Windows · Mac · Linux",
+         "color": "#6C63FF", "dl_android": "https://play.google.com/store/apps/details?id=app.hiddify.com", "dl_ios": "https://apps.apple.com/app/hiddify-proxy-vpn/id6596777532"},
+        {"name": "Happ (V2RayTun)", "scheme": "v2raytun", "desc": "Sing-Box клиент", "platforms": "Android",
+         "color": "#5B8DEF", "dl_android": "https://play.google.com/store/apps/details?id=com.v2raytun.android", "dl_ios": ""},
+        {"name": "Streisand", "scheme": "streisand", "desc": "Простой и лёгкий", "platforms": "iOS",
+         "color": "#E74C8B", "dl_android": "", "dl_ios": "https://apps.apple.com/app/streisand/id6450534064"},
+    ]
+
+    app_cards_html = ""
+    for app in apps:
+        deeplink = f"{app['scheme']}://install-config?url={encoded}"
+        escaped_dl = html.escape(deeplink, quote=True)
+        dl_links = ""
+        if app.get("dl_android"):
+            dl_links += f'<a class="store-link" href="{html.escape(app["dl_android"], quote=True)}" target="_blank">Google Play</a>'
+        if app.get("dl_ios"):
+            dl_links += f'<a class="store-link" href="{html.escape(app["dl_ios"], quote=True)}" target="_blank">App Store</a>'
+        app_cards_html += f"""
+        <div class="app-row">
+            <div class="app-left">
+                <div class="app-dot" style="background:{app['color']}"></div>
+                <div>
+                    <div class="app-name">{html.escape(app['name'])}</div>
+                    <div class="app-desc">{html.escape(app['desc'])} &middot; {html.escape(app['platforms'])}</div>
+                    <div class="store-links">{dl_links}</div>
+                </div>
+            </div>
+            <div class="app-btns">
+                <a class="btn accent" href="{escaped_dl}">Подключить</a>
+                <button class="btn ghost copy-btn" data-link="{escaped_dl}" type="button">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                </button>
+            </div>
+        </div>"""
+
+    # Meta info
+    meta = meta or {}
+    remaining_days = meta.get("rd", "-")
+    remaining_hours = meta.get("rh", "-")
+    remaining_minutes = meta.get("rm", "-")
+    usage_current = meta.get("uc", "-")
+    usage_limit = meta.get("ul", "-")
+
+    progress_pct = 0
+    try:
+        uc = float(str(usage_current).replace(",", "."))
+        ul = float(str(usage_limit).replace(",", "."))
+        if ul > 0:
+            progress_pct = min(100, int((uc / ul) * 100))
+    except (ValueError, TypeError):
+        pass
+
+    days_class = "ok"
+    try:
+        rd = int(remaining_days)
+        if rd <= 3:
+            days_class = "crit"
+        elif rd <= 7:
+            days_class = "warn"
+    except (ValueError, TypeError):
+        pass
+
+    progress_color = "#ef4444" if progress_pct > 80 else "#f59e0b" if progress_pct > 60 else "#10b981"
+
+    # Devices section
+    devices_html = ""
+    devices = devices or []
+    if devices:
+        dev_icons = {"phone": "📱", "computer": "💻", "tv": "📺"}
+        for d in devices[:10]:
+            icon = dev_icons.get(_normalize_device_type(d.get("type")), "💻")
+            dname = html.escape(d.get("name") or "Неизвестно")
+            dapp = html.escape(d.get("app") or "—")
+            dlast = html.escape(d.get("last_seen") or "—")
+            devices_html += f"""
+            <div class="dev-row">
+                <span class="dev-icon">{icon}</span>
+                <div class="dev-info"><span class="dev-name">{dname}</span><span class="dev-app">{dapp}</span></div>
+                <span class="dev-time">{dlast}</span>
+            </div>"""
+    else:
+        devices_html = '<div class="empty-state">Устройства появятся после первого подключения</div>'
+
+    js_sub_url = json.dumps(sub_url)
+
+    # FAQ items
+    faq_items = [
+        ("Как подключиться?", "Нажмите кнопку «Подключить» напротив нужного приложения. Если приложение установлено — конфигурация импортируется автоматически. Если нет — сначала установите его из магазина."),
+        ("Какое приложение выбрать?", "<b>Hiddify Next</b> — универсальный, работает на всех платформах. <b>Happ</b> (V2RayTun) — хорошо работает на Android. <b>Streisand</b> — для iOS."),
+        ("Подписка не работает?", "Нажмите кнопку обновления подписки в приложении (иконка 🔄). Если не помогло — удалите подписку и добавьте заново через кнопку «Подключить»."),
+        ("Можно ли использовать на нескольких устройствах?", "Да, подписку можно добавить на несколько устройств. Количество одновременных подключений зависит от вашего тарифа."),
+        ("Как продлить подписку?", "Напишите нашему боту в Telegram — @SmartKamaVPN_bot. Оплатите продление и подписка обновится автоматически."),
+    ]
+    faq_html = ""
+    for i, (q, a) in enumerate(faq_items):
+        faq_html += f"""
+        <details class="faq-item"><summary>{html.escape(q)}</summary><div class="faq-answer">{a}</div></details>"""
+
+    return f"""<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>SmartKamaVPN — Подписка</title>
+<style>
+*{{box-sizing:border-box;margin:0;padding:0}}
+:root{{--bg:#0a0e1a;--surf:#111827;--surf2:#1f2937;--border:#374151;--text:#f3f4f6;--muted:#9ca3af;--accent:#6366f1;--accent2:#818cf8;--green:#10b981;--yellow:#f59e0b;--red:#ef4444;--radius:12px}}
+body{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;color:var(--text);background:var(--bg);min-height:100vh}}
+.wrap{{max-width:480px;margin:0 auto;padding:0 16px 32px}}
+
+/* ── Hero Banner ── */
+.hero{{
+  position:relative;overflow:hidden;
+  background:linear-gradient(135deg,#1e1b4b 0%,#312e81 30%,#4338ca 60%,#6366f1 100%);
+  padding:32px 20px 28px;text-align:center;
+  border-radius:0 0 24px 24px;margin-bottom:20px;
+}}
+.hero::before{{
+  content:'';position:absolute;top:-40%;right:-20%;width:300px;height:300px;
+  background:radial-gradient(circle,rgba(99,102,241,.3) 0%,transparent 70%);
+  border-radius:50%;
+}}
+.hero::after{{
+  content:'';position:absolute;bottom:-30%;left:-15%;width:250px;height:250px;
+  background:radial-gradient(circle,rgba(16,185,129,.2) 0%,transparent 70%);
+  border-radius:50%;
+}}
+.hero-content{{position:relative;z-index:1}}
+.logo-shield{{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:64px;height:64px;border-radius:18px;
+  background:rgba(255,255,255,.12);backdrop-filter:blur(8px);
+  margin-bottom:12px;font-size:32px;
+}}
+.hero h1{{font-size:22px;font-weight:800;letter-spacing:-.5px;margin-bottom:4px}}
+.hero .brand-sub{{color:rgba(255,255,255,.65);font-size:13px}}
+
+/* ── Cards ── */
+.card{{background:var(--surf);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:12px}}
+.card-head{{display:flex;align-items:center;gap:8px;margin-bottom:14px}}
+.card-head svg{{width:18px;height:18px;color:var(--accent2);flex-shrink:0}}
+.card-label{{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}}
+
+/* ── Stats ── */
+.stats-grid{{display:grid;grid-template-columns:1fr 1fr;gap:10px}}
+.stat{{background:var(--surf2);border-radius:10px;padding:14px;border:1px solid var(--border)}}
+.stat-lbl{{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.3px}}
+.stat-val{{font-size:22px;font-weight:800;margin-top:2px}}
+.stat-val.ok{{color:var(--green)}}.stat-val.warn{{color:var(--yellow)}}.stat-val.crit{{color:var(--red)}}
+.stat-val small{{font-size:12px;font-weight:400;color:var(--muted)}}
+.progress-wrap{{margin-top:14px}}
+.progress-lbl{{display:flex;justify-content:space-between;font-size:12px;color:var(--muted);margin-bottom:6px}}
+.progress-bar{{height:6px;background:var(--surf2);border-radius:3px;overflow:hidden}}
+.progress-fill{{height:100%;border-radius:3px;transition:width .4s ease}}
+
+/* ── Sub link ── */
+.link-box{{display:flex;align-items:center;gap:8px;background:var(--surf2);border:1px solid var(--border);border-radius:10px;padding:10px 12px}}
+.link-text{{flex:1;font-family:'SF Mono',Monaco,Consolas,monospace;font-size:11px;color:#d1d5db;word-break:break-all;line-height:1.4}}
+.btn{{display:inline-flex;align-items:center;justify-content:center;gap:6px;text-decoration:none;color:#fff;padding:8px 14px;border-radius:8px;font-size:13px;font-weight:600;border:none;cursor:pointer;white-space:nowrap;transition:all .15s}}
+.btn.accent{{background:var(--accent)}}.btn.accent:active{{background:#4f46e5}}
+.btn.green{{background:var(--green)}}.btn.green:active{{background:#059669}}
+.btn.ghost{{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 10px}}
+.btn.ghost:active{{border-color:var(--accent);color:var(--accent)}}
+.btn.copied{{background:var(--green)!important;border-color:var(--green)!important;color:#fff!important}}
+
+/* ── Apps ── */
+.app-row{{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border)}}
+.app-row:last-child{{border-bottom:none}}
+.app-left{{display:flex;align-items:flex-start;gap:10px;flex:1;min-width:0}}
+.app-dot{{width:10px;height:10px;border-radius:50%;margin-top:5px;flex-shrink:0}}
+.app-name{{font-size:14px;font-weight:700}}
+.app-desc{{font-size:11px;color:var(--muted);margin-top:1px}}
+.store-links{{display:flex;gap:8px;margin-top:4px}}
+.store-link{{font-size:11px;color:var(--accent2);text-decoration:none}}
+.store-link:hover{{text-decoration:underline}}
+.app-btns{{display:flex;gap:6px;flex-shrink:0}}
+
+/* ── Devices ── */
+.dev-row{{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}}
+.dev-row:last-child{{border-bottom:none}}
+.dev-icon{{font-size:18px}}.dev-info{{flex:1;display:flex;flex-direction:column}}
+.dev-name{{font-size:13px;font-weight:600}}.dev-app{{font-size:11px;color:var(--muted)}}
+.dev-time{{font-size:11px;color:var(--muted);white-space:nowrap}}
+.empty-state{{text-align:center;color:var(--muted);padding:16px;font-size:13px}}
+
+/* ── FAQ ── */
+.faq-item{{border-bottom:1px solid var(--border)}}
+.faq-item:last-child{{border-bottom:none}}
+.faq-item summary{{padding:12px 0;font-size:14px;font-weight:600;cursor:pointer;list-style:none;display:flex;align-items:center;justify-content:space-between}}
+.faq-item summary::after{{content:'＋';color:var(--muted);font-size:16px;transition:transform .2s}}
+.faq-item[open] summary::after{{content:'−'}}
+.faq-answer{{padding:0 0 12px;font-size:13px;color:var(--muted);line-height:1.6}}
+.faq-answer b{{color:var(--text);font-weight:600}}
+
+/* ── Footer ── */
+.footer{{text-align:center;padding:20px 0 8px;color:var(--muted);font-size:11px}}
+.footer a{{color:var(--accent2);text-decoration:none}}
+
+/* ── Toast ── */
+.toast{{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--accent);color:#fff;padding:10px 20px;border-radius:10px;font-size:14px;font-weight:600;opacity:0;transition:all .3s;pointer-events:none;z-index:100}}
+.toast.show{{transform:translateX(-50%) translateY(0);opacity:1}}
+</style>
+</head>
+<body>
+<div class="hero">
+    <div class="hero-content">
+        <div class="logo-shield">🛡️</div>
+        <h1>SmartKamaVPN</h1>
+        <div class="brand-sub">Быстрый и надёжный VPN-сервис</div>
+    </div>
+</div>
+
+<div class="wrap">
+    <!-- Status -->
+    <div class="card">
+        <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+            <span class="card-label">Статус подписки</span>
+        </div>
+        <div class="stats-grid">
+            <div class="stat">
+                <div class="stat-lbl">Осталось</div>
+                <div class="stat-val {days_class}">{html.escape(str(remaining_days))} <small>дн.</small></div>
+            </div>
+            <div class="stat">
+                <div class="stat-lbl">Часы : Минуты</div>
+                <div class="stat-val ok">{html.escape(str(remaining_hours))}:{html.escape(str(remaining_minutes))}</div>
+            </div>
+        </div>
+        <div class="progress-wrap">
+            <div class="progress-lbl">
+                <span>Трафик: {html.escape(str(usage_current))} ГБ</span>
+                <span>из {html.escape(str(usage_limit))} ГБ</span>
+            </div>
+            <div class="progress-bar">
+                <div class="progress-fill" style="width:{progress_pct}%;background:{progress_color}"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Subscription Link -->
+    <div class="card">
+        <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span class="card-label">Ссылка подписки</span>
+        </div>
+        <div class="link-box">
+            <div class="link-text" id="subUrl">{escaped_sub_url}</div>
+            <button class="btn green" id="copyMain" type="button">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+                Копировать
+            </button>
+        </div>
+    </div>
+
+    <!-- Apps -->
+    <div class="card">
+        <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            <span class="card-label">Подключение</span>
+        </div>
+        <p style="font-size:12px;color:var(--muted);margin-bottom:8px">Выберите приложение и нажмите «Подключить» — конфигурация импортируется автоматически.</p>
+        {app_cards_html}
+    </div>
+
+    <!-- Devices -->
+    <div class="card">
+        <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+            <span class="card-label">Устройства</span>
+        </div>
+        {devices_html}
+    </div>
+
+    <!-- FAQ -->
+    <div class="card">
+        <div class="card-head">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+            <span class="card-label">Частые вопросы</span>
+        </div>
+        {faq_html}
+    </div>
+
+    <div class="footer">
+        SmartKamaVPN &copy; 2026 &middot;
+        <a href="https://t.me/SmartKamaVPN_bot">Telegram-бот</a>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<script>
+(function(){{
+    const subUrl={js_sub_url};
+    const toast=document.getElementById('toast');
+    let tt;
+    function showToast(m){{toast.textContent=m;toast.classList.add('show');clearTimeout(tt);tt=setTimeout(()=>toast.classList.remove('show'),2000)}}
+    async function cp(text,btn){{
+        try{{
+            await navigator.clipboard.writeText(text);
+            if(btn){{const o=btn.innerHTML;btn.classList.add('copied');btn.innerHTML='✓';setTimeout(()=>{{btn.classList.remove('copied');btn.innerHTML=o}},1500)}}
+            showToast('Скопировано!');
+        }}catch(e){{showToast('Ошибка копирования')}}
+    }}
+    document.getElementById('copyMain').addEventListener('click',function(){{cp(subUrl,this)}});
+    document.querySelectorAll('.copy-btn').forEach(b=>b.addEventListener('click',function(){{cp(this.dataset.link,this)}}));
+}})();
+</script>
 </body>
 </html>
 """.encode("utf-8")
@@ -619,6 +1355,8 @@ def proxy_subscription_source(target_url):
             ):
                 v = resp.headers.get(h)
                 if v:
+                    if h == "profile-title":
+                        v = _encode_profile_title(v)
                     passthrough_headers[h] = v
             return data, content_type, passthrough_headers
     except Exception:
@@ -769,6 +1507,22 @@ def _load_export_host(request_host=None):
         host = host.split(":", 1)[0].strip()
         if host not in ("127.0.0.1", "localhost"):
             return host
+
+
+def _build_external_host(headers):
+    forwarded_host = (headers.get("X-Forwarded-Host") or headers.get("Host") or "").split(",", 1)[0].strip()
+    export_host = _load_export_host(forwarded_host)
+    host = export_host or forwarded_host or "sub.smartkama.ru"
+    host_only = host.split(":", 1)[0].strip()
+
+    forwarded_port = (headers.get("X-Forwarded-Port") or "").split(",", 1)[0].strip()
+    if not forwarded_port and ":" in forwarded_host and not forwarded_host.startswith("["):
+        forwarded_port = forwarded_host.rsplit(":", 1)[-1].strip()
+
+    proto = (headers.get("X-Forwarded-Proto") or "https").split(",", 1)[0].strip().lower() or "https"
+    if forwarded_port and ((proto == "https" and forwarded_port != "443") or (proto == "http" and forwarded_port != "80")):
+        return f"{host_only}:{forwarded_port}"
+    return host_only
     return None
 
 
@@ -1149,6 +1903,110 @@ def _collect_server_ips(outbounds):
     return ips
 
 
+_SINGBOX_DIRECT_DOMAINS_DEFAULT = (
+    # --- Connectivity checks (universal) ---
+    "captive.apple.com",
+    "www.apple.com",
+    "connectivitycheck.android.com",
+    "connectivitycheck.gstatic.com",
+    "clients3.google.com",
+    "www.gstatic.com",
+    "msftconnecttest.com",
+    "www.msftconnecttest.com",
+    "msftncsi.com",
+    "www.msftncsi.com",
+    "detectportal.firefox.com",
+    "nmcheck.gnome.org",
+    "networkcheck.kde.org",
+    # --- NTP ---
+    "time.apple.com",
+    "time.windows.com",
+    "time.google.com",
+    "pool.ntp.org",
+    "ntp.ru",
+    "pool.ntp.ru",
+    # --- MTS captive portal & auth ---
+    "captive.mts.ru",
+    "login.mts.ru",
+    "auth.mts.ru",
+    "internet.mts.ru",
+    "lk.mts.ru",
+    "start.mts.ru",
+    # --- Beeline captive portal & auth ---
+    "captive.beeline.ru",
+    "hotspot.beeline.ru",
+    "wifi.beeline.ru",
+    "auth.beeline.ru",
+    "login.beeline.ru",
+    "my.beeline.ru",
+    # --- Tele2 captive portal & auth ---
+    "captive.tele2.ru",
+    "auth.tele2.ru",
+    "internet.tele2.ru",
+    "my.tele2.ru",
+    "lk.tele2.ru",
+    # --- Yota captive portal & auth ---
+    "captive.yota.ru",
+    "hotspot.yota.ru",
+    "yota.ru",
+    "my.yota.ru",
+    # --- Megafon captive portal & auth ---
+    "captive.megafon.ru",
+    "internet.megafon.ru",
+    "my.megafon.ru",
+    "login.megafon.ru.com",
+    "time.google.com",
+    "pool.ntp.org",
+    "ntp.ru",
+    "pool.ntp.ru",
+    # --- MTS captive portal & auth ---
+    "captive.mts.ru",
+    "login.mts.ru",
+    "auth.mts.ru",
+    "internet.mts.ru",
+    "lk.mts.ru",
+    "start.mts.ru",
+    # --- Beeline captive portal & auth ---
+    "captive.beeline.ru",
+    "hotspot.beeline.ru",
+    "wifi.beeline.ru",
+    "auth.beeline.ru",
+    "login.beeline.ru",
+    "my.beeline.ru",
+    # --- Tele2 captive portal & auth ---
+    "captive.tele2.ru",
+    "auth.tele2.ru",
+    "internet.tele2.ru",
+    "my.tele2.ru",
+    "lk.tele2.ru",
+    # --- Yota captive portal & auth ---
+    "captive.yota.ru",
+    "hotspot.yota.ru",
+    "yota.ru",
+    "my.yota.ru",
+    # --- Megafon captive portal & auth ---
+    "captive.megafon.ru",
+    "internet.megafon.ru",
+    "my.megafon.ru",
+    "login.megafon.ru",
+)
+
+_SINGBOX_DIRECT_SUFFIXES_DEFAULT = (
+    "local",
+    "lan",
+    "localdomain",
+    "home.arpa",
+)
+
+
+def _env_csv(name: str, defaults) -> list:
+    raw = os.getenv(name, "")
+    items = [item.strip().lower() for item in raw.split(",") if item.strip()]
+    if items:
+        return items
+    return list(defaults)
+
+
 def _build_singbox_config(proxy_lines, operator=None):
     """Build a full sing-box JSON configuration from proxy lines."""
     ordered = _sort_lines_by_operator(proxy_lines, operator)
@@ -1163,6 +2021,9 @@ def _build_singbox_config(proxy_lines, operator=None):
 
     if not proxy_tags:
         return None
+
+    direct_domains = _env_csv("SMARTKAMA_SINGBOX_DIRECT_DOMAINS", _SINGBOX_DIRECT_DOMAINS_DEFAULT)
+    direct_suffixes = _env_csv("SMARTKAMA_SINGBOX_DIRECT_SUFFIXES", _SINGBOX_DIRECT_SUFFIXES_DEFAULT)
 
     # url_test group — automatic best-latency selection
     url_test = {
@@ -1213,6 +2074,8 @@ def _build_singbox_config(proxy_lines, operator=None):
                 {"outbound": ["any"], "server": "dns-direct"},
                 {"clash_mode": "Direct", "server": "dns-direct"},
                 {"clash_mode": "Global", "server": "dns-proxy"},
+                {"domain": direct_domains, "server": "dns-direct"},
+                {"domain_suffix": direct_suffixes, "server": "dns-direct"},
                 {
                     "rule_set": "geosite-category-ads-all",
                     "server": "dns-block",
@@ -1222,7 +2085,31 @@ def _build_singbox_config(proxy_lines, operator=None):
             "final": "dns-proxy",
             "strategy": "prefer_ipv4",
         },
-        "inbounds": [],
+        "inbounds": [
+            {
+                "type": "tun",
+                "tag": "tun-in",
+                "inet4_address": "172.19.0.1/30",
+                "inet6_address": "fdfe:dcba:9876::1/126",
+                "auto_route": True,
+                "strict_route": True,
+                "sniff": True,
+            },
+            {
+                "type": "socks",
+                "tag": "socks-in",
+                "listen": "127.0.0.1",
+                "listen_port": 2080,
+                "sniff": True,
+            },
+            {
+                "type": "http",
+                "tag": "http-in",
+                "listen": "127.0.0.1",
+                "listen_port": 2090,
+                "sniff": True,
+            },
+        ],
         "outbounds": all_outbounds,
         "route": {
             "auto_detect_interface": True,
@@ -1236,7 +2123,11 @@ def _build_singbox_config(proxy_lines, operator=None):
                     "outbound": "block",
                 },
                 {
-                    "rule_set": ["geoip-ru", "geosite-category-ru"],
+                    "domain": direct_domains,
+                    "outbound": "direct",
+                },
+                {
+                    "domain_suffix": direct_suffixes,
                     "outbound": "direct",
                 },
                 {
@@ -1252,25 +2143,20 @@ def _build_singbox_config(proxy_lines, operator=None):
                     "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ads-all.srs",
                     "download_detour": "direct",
                 },
-                {
-                    "tag": "geoip-ru",
-                    "type": "remote",
-                    "format": "binary",
-                    "url": "https://raw.githubusercontent.com/SagerNet/sing-geoip/rule-set/geoip-ru.srs",
-                    "download_detour": "direct",
-                },
-                {
-                    "tag": "geosite-category-ru",
-                    "type": "remote",
-                    "format": "binary",
-                    "url": "https://raw.githubusercontent.com/SagerNet/sing-geosite/rule-set/geosite-category-ru.srs",
-                    "download_detour": "direct",
-                },
             ],
         },
 
     }
     return config
+
+
+def _encode_profile_title(title: str) -> str:
+    """Encode profile-title for HTTP header (base64 for non-ASCII, plain for ASCII)."""
+    try:
+        title.encode('latin-1')
+        return title
+    except UnicodeEncodeError:
+        return "base64:" + base64.b64encode(title.encode('utf-8')).decode('ascii')
 
 
 def _normalize_subscription_payload(target_url, payload, operator=None, export_host=None):
@@ -1387,6 +2273,16 @@ def ensure_table(conn):
     )
     conn.execute(
         """
+        CREATE TABLE IF NOT EXISTS short_link_aliases (
+            token TEXT PRIMARY KEY,
+            canonical_token TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY(canonical_token) REFERENCES short_links(token) ON DELETE CASCADE
+        )
+        """
+    )
+    conn.execute(
+        """
         CREATE TABLE IF NOT EXISTS short_links_meta (
             token TEXT PRIMARY KEY,
             remaining_days INTEGER,
@@ -1402,11 +2298,30 @@ def ensure_table(conn):
     conn.commit()
 
 
+def _resolve_canonical_token(conn, token):
+    row = conn.execute("SELECT token FROM short_links WHERE token=?", (token,)).fetchone()
+    if row:
+        return row[0]
+    row = conn.execute("SELECT canonical_token FROM short_link_aliases WHERE token=?", (token,)).fetchone()
+    return row[0] if row else None
+
+
 def find_target(token):
     conn = sqlite3.connect(DB_PATH)
     try:
         ensure_table(conn)
         row = conn.execute("SELECT target_url FROM short_links WHERE token=?", (token,)).fetchone()
+        if row:
+            return row[0]
+        row = conn.execute(
+            """
+            SELECT sl.target_url
+            FROM short_link_aliases sla
+            JOIN short_links sl ON sl.token = sla.canonical_token
+            WHERE sla.token=?
+            """,
+            (token,),
+        ).fetchone()
         return row[0] if row else None
     finally:
         conn.close()
@@ -1416,7 +2331,8 @@ def update_target(token, target_url):
     conn = sqlite3.connect(DB_PATH)
     try:
         ensure_table(conn)
-        conn.execute("UPDATE short_links SET target_url=? WHERE token=?", (target_url, token))
+        canonical_token = _resolve_canonical_token(conn, token) or token
+        conn.execute("UPDATE short_links SET target_url=? WHERE token=?", (target_url, canonical_token))
         conn.commit()
     finally:
         conn.close()
@@ -1500,12 +2416,13 @@ def find_meta(token):
     conn = sqlite3.connect(DB_PATH)
     try:
         ensure_table(conn)
+        canonical_token = _resolve_canonical_token(conn, token) or token
         row = conn.execute(
             """
             SELECT remaining_days, remaining_hours, remaining_minutes, usage_current, usage_limit
             FROM short_links_meta WHERE token=?
             """,
-            (token,),
+            (canonical_token,),
         ).fetchone()
         if not row:
             return None
@@ -1521,6 +2438,17 @@ def find_meta(token):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def send_header(self, keyword, value):
+        """Override: auto-encode non-ASCII header values so send_header never raises
+        UnicodeEncodeError (Python's BaseHTTPServer encodes headers as latin-1 strict).
+        """
+        if isinstance(value, str):
+            try:
+                value.encode('latin-1')
+            except UnicodeEncodeError:
+                value = "base64:" + base64.b64encode(value.encode('utf-8')).decode('ascii')
+        super().send_header(keyword, value)
+
     def _handle_redirect(self, send_body=True):
         parsed = urlparse(self.path)
         path = parsed.path
@@ -1530,7 +2458,40 @@ class Handler(BaseHTTPRequestHandler):
         client_hint, has_explicit_client_hint = _resolve_client_hint(query, self.headers)
         operator = _resolve_operator_hint(raw_operator, client_hint)
 
+        # Track device for /sub/ requests (UUID resolved inside)
         if path.startswith("/sub/"):
+            _track_device_for_sub(self.path, self.headers, self.client_address)
+
+        if path.startswith("/sub/"):
+            # ── Device limit enforcement ──
+            sub_segment = path.split("/sub/", 1)[1].strip("/").split("?")[0].split("/")[0]
+            resolved_uuid = _resolve_sub_uuid(sub_segment) if sub_segment else ""
+            if resolved_uuid and _is_device_over_limit(resolved_uuid):
+                ua_lower = (self.headers.get("User-Agent") or "").lower()
+                fmt_param = (query.get("format") or [""])[0].lower().strip()
+                _sb_only = ("sing-box", "singbox", "nekobox")
+                wants_sb = (fmt_param in ("singbox", "sing-box", "json") or
+                            any(h in ua_lower for h in _sb_only))
+                _dev_title = _encode_profile_title("SmartKamaVPN - лимит устройств")
+                if wants_sb:
+                    body = json.dumps(_DEVICE_BLOCKED_SINGBOX, ensure_ascii=False).encode("utf-8")
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json; charset=utf-8")
+                    self.send_header("profile-title", _dev_title)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    if send_body:
+                        self.wfile.write(body)
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain; charset=utf-8")
+                    self.send_header("profile-title", _dev_title)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    if send_body:
+                        self.wfile.write(_DEVICE_BLOCKED_PAYLOAD)
+                return
+
             target = f"http://127.0.0.1:8000{path}"
             if parsed.query:
                 target = f"{target}?{parsed.query}"
@@ -1546,11 +2507,12 @@ class Handler(BaseHTTPRequestHandler):
                             fallback_target = f"{fallback_target}?{parsed.query}"
                         payload, content_type, upstream_headers = proxy_subscription_source(fallback_target)
             if payload is not None:
-                # Auto-detect sing-box capable clients (happ, hiddify, sing-box, nekobox...)
-                # and serve sing-box JSON format instead of base64 for better UI display
+                # Auto-detect sing-box native clients and serve JSON format.
+                # NOTE: Hiddify/Happ works better with base64 proxy links (vless://, trojan://)
+                # — serving full sing-box JSON to Happ causes it to show a single "custom" entry.
                 ua_lower = (self.headers.get("User-Agent") or "").lower()
                 fmt_param = (query.get("format") or [""])[0].lower().strip()
-                _sb_clients = ("happ", "sing-box", "singbox", "hiddify", "nekobox")
+                _sb_clients = ("sing-box", "singbox", "nekobox")
                 wants_singbox = (fmt_param in ("singbox", "sing-box", "json") or
                                  any(h in ua_lower for h in _sb_clients))
                 if wants_singbox:
@@ -1561,6 +2523,11 @@ class Handler(BaseHTTPRequestHandler):
                             body = json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
                             self.send_response(200)
                             self.send_header("Content-Type", "application/json; charset=utf-8")
+                            self.send_header("profile-title", "SmartKamaVPN")
+                            self.send_header("content-disposition", 'attachment; filename="SmartKamaVPN.json"')
+                            for hk, hv in (upstream_headers or {}).items():
+                                if hk.lower() != "profile-title":
+                                    self.send_header(hk, hv)
                             self.send_header("Cache-Control", "no-store")
                             self.end_headers()
                             if send_body:
@@ -1571,6 +2538,8 @@ class Handler(BaseHTTPRequestHandler):
                 payload = _normalize_subscription_payload(target, payload, operator=operator, export_host=export_host)
                 self.send_response(200)
                 self.send_header("Content-Type", content_type or "text/plain; charset=utf-8")
+                if "profile-title" not in (upstream_headers or {}):
+                    self.send_header("profile-title", "SmartKamaVPN")
                 for hk, hv in (upstream_headers or {}).items():
                     self.send_header(hk, hv)
                 self.send_header("Cache-Control", "no-store")
@@ -1579,11 +2548,77 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(payload)
                 return
 
+        # ── Subscription info page: /p/<sub_id> ──
+        if path.startswith("/p/"):
+            sub_id = path.split("/p/", 1)[1].strip("/")
+            if sub_id and len(sub_id) <= 64:
+                sub_url = f"http://127.0.0.1:8000/sub/{sub_id}"
+                payload, _, upstream_headers = proxy_subscription_source(sub_url)
+                if payload is None and len(sub_id) <= 32:
+                    resolved = _resolve_marzban_sub_path(sub_id)
+                    if resolved:
+                        sub_url = f"http://127.0.0.1:8000{resolved}"
+                        payload, _, upstream_headers = proxy_subscription_source(sub_url)
+
+                if payload is not None:
+                    # Parse subscription-userinfo header for meta
+                    info_str = (upstream_headers or {}).get("subscription-userinfo", "")
+                    meta = {}
+                    if info_str:
+                        info_parts = {}
+                        for part in info_str.split(";"):
+                            part = part.strip()
+                            if "=" in part:
+                                k, v = part.split("=", 1)
+                                info_parts[k.strip()] = v.strip()
+                        # subscription-userinfo: upload=X; download=Y; total=Z; expire=T
+                        try:
+                            up = int(info_parts.get("upload", 0))
+                            down = int(info_parts.get("download", 0))
+                            total = int(info_parts.get("total", 0))
+                            expire = int(info_parts.get("expire", 0))
+                            used_gb = (up + down) / (1024 ** 3)
+                            total_gb = total / (1024 ** 3)
+                            remaining_gb = max(0, total_gb - used_gb)
+                            meta["uc"] = f"{used_gb:.2f}"
+                            meta["ul"] = f"{total_gb:.0f}"
+                            if expire > 0:
+                                import time
+                                remaining_sec = max(0, expire - time.time())
+                                rd = int(remaining_sec // 86400)
+                                rh = int((remaining_sec % 86400) // 3600)
+                                rm = int((remaining_sec % 3600) // 60)
+                                meta["rd"] = str(rd)
+                                meta["rh"] = str(rh)
+                                meta["rm"] = str(rm)
+                            else:
+                                meta["rd"] = "∞"
+                                meta["rh"] = "0"
+                                meta["rm"] = "0"
+                        except (ValueError, TypeError):
+                            pass
+
+                    # Build external subscription URL for the page
+                    ext_host = _build_external_host(self.headers)
+                    ext_sub_url = f"https://{ext_host}/sub/{sub_id}"
+
+                    devices = _get_devices_for_sub(sub_id)
+
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/html; charset=utf-8")
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                    if send_body:
+                        self.wfile.write(build_subscription_page(sub_id, ext_sub_url, meta, devices))
+                    return
+
         if path.startswith("/s/"):
             token = path.split("/s/", 1)[1].strip("/")
             if token:
                 target = find_target(token)
                 if target:
+                    # Track device with resolved target URL (contains real /sub/ path)
+                    _track_device_for_sub(self.path, self.headers, self.client_address, resolved_target_url=target)
                     normalized_target = _normalize_target_url(target)
                     if normalized_target != target:
                         try:
@@ -1591,6 +2626,36 @@ class Handler(BaseHTTPRequestHandler):
                         except Exception:
                             pass
                         target = normalized_target
+
+                    # ── Device limit enforcement for /s/ ──
+                    if is_subscription_target(target):
+                        _s_sub_seg = ""
+                        if "/sub/" in target:
+                            _s_sub_seg = target.split("/sub/", 1)[1].strip("/").split("?")[0].split("/")[0]
+                        _s_uuid = _resolve_sub_uuid(_s_sub_seg) if _s_sub_seg else ""
+                        if _s_uuid and _is_device_over_limit(_s_uuid):
+                            ua_lower = (self.headers.get("User-Agent") or "").lower()
+                            _sb_only = ("sing-box", "singbox", "nekobox")
+                            wants_sb = any(h in ua_lower for h in _sb_only)
+                            _dev_title = _encode_profile_title("SmartKamaVPN - лимит устройств")
+                            if wants_sb:
+                                body = json.dumps(_DEVICE_BLOCKED_SINGBOX, ensure_ascii=False).encode("utf-8")
+                                self.send_response(200)
+                                self.send_header("Content-Type", "application/json; charset=utf-8")
+                                self.send_header("profile-title", _dev_title)
+                                self.send_header("Cache-Control", "no-store")
+                                self.end_headers()
+                                if send_body:
+                                    self.wfile.write(body)
+                            else:
+                                self.send_response(200)
+                                self.send_header("Content-Type", "text/plain; charset=utf-8")
+                                self.send_header("profile-title", _dev_title)
+                                self.send_header("Cache-Control", "no-store")
+                                self.end_headers()
+                                if send_body:
+                                    self.wfile.write(_DEVICE_BLOCKED_PAYLOAD)
+                            return
 
                     force_app_redirect = (query.get("app") or [""])[0] == "1" or has_explicit_client_hint
                     force_web_page = (query.get("web") or [""])[0] == "1"
@@ -1606,6 +2671,8 @@ class Handler(BaseHTTPRequestHandler):
                                     body = json.dumps(config, ensure_ascii=False, indent=2).encode("utf-8")
                                     self.send_response(200)
                                     self.send_header("Content-Type", "application/json; charset=utf-8")
+                                    self.send_header("profile-title", "SmartKamaVPN")
+                                    self.send_header("content-disposition", 'attachment; filename="SmartKamaVPN.json"')
                                     self.send_header("Cache-Control", "no-store")
                                     self.end_headers()
                                     if send_body:
@@ -1618,6 +2685,8 @@ class Handler(BaseHTTPRequestHandler):
                                 payload = _normalize_subscription_payload(target, payload, operator=operator, export_host=export_host)
                                 self.send_response(200)
                                 self.send_header("Content-Type", content_type or "text/plain; charset=utf-8")
+                                if "profile-title" not in (upstream_headers or {}):
+                                    self.send_header("profile-title", "SmartKamaVPN")
                                 for hk, hv in (upstream_headers or {}).items():
                                     self.send_header(hk, hv)
                                 self.send_header("Cache-Control", "no-store")
@@ -1632,6 +2701,8 @@ class Handler(BaseHTTPRequestHandler):
                                 payload = _normalize_subscription_payload(target, payload, operator=operator, export_host=export_host)
                                 self.send_response(200)
                                 self.send_header("Content-Type", content_type or "text/plain; charset=utf-8")
+                                if "profile-title" not in (upstream_headers or {}):
+                                    self.send_header("profile-title", "SmartKamaVPN")
                                 for hk, hv in (upstream_headers or {}).items():
                                     self.send_header(hk, hv)
                                 self.send_header("Cache-Control", "no-store")
@@ -1647,6 +2718,8 @@ class Handler(BaseHTTPRequestHandler):
                                 payload = _normalize_subscription_payload(target, payload, operator=operator, export_host=export_host)
                                 self.send_response(200)
                                 self.send_header("Content-Type", content_type or "text/plain; charset=utf-8")
+                                if "profile-title" not in (upstream_headers or {}):
+                                    self.send_header("profile-title", "SmartKamaVPN")
                                 for hk, hv in (upstream_headers or {}).items():
                                     self.send_header(hk, hv)
                                 self.send_header("Cache-Control", "no-store")
@@ -1681,6 +2754,72 @@ class Handler(BaseHTTPRequestHandler):
                         self.send_header("Cache-Control", "no-store")
                         self.end_headers()
                     return
+
+        # ── Fallback: try resolving root-level path as a short link token ──
+        # Supports name-based links like /ИмяПодписки or /myname
+        root_token = path.strip("/")
+        if root_token and "/" not in root_token:
+            from urllib.parse import unquote as _unquote
+            decoded_token = _unquote(root_token)
+            target = find_target(decoded_token) or find_target(root_token)
+            if target:
+                _track_device_for_sub(self.path, self.headers, self.client_address, resolved_target_url=target)
+                normalized_target = _normalize_target_url(target)
+                if normalized_target != target:
+                    try:
+                        update_target(decoded_token, normalized_target)
+                    except Exception:
+                        pass
+                    target = normalized_target
+
+                if is_subscription_target(target):
+                    _n_sub_seg = ""
+                    if "/sub/" in target:
+                        _n_sub_seg = target.split("/sub/", 1)[1].strip("/").split("?")[0].split("/")[0]
+                    _n_uuid = _resolve_sub_uuid(_n_sub_seg) if _n_sub_seg else ""
+                    if _n_uuid and _is_device_over_limit(_n_uuid):
+                        ua_lower = (self.headers.get("User-Agent") or "").lower()
+                        fmt_param = (query.get("format") or [""])[0].lower().strip()
+                        _sb_only = ("sing-box", "singbox", "nekobox")
+                        wants_sb = (fmt_param in ("singbox", "sing-box", "json") or
+                                    any(h in ua_lower for h in _sb_only))
+                        if wants_sb:
+                            body = json.dumps(_DEVICE_BLOCKED_SINGBOX, ensure_ascii=False).encode("utf-8")
+                            self.send_response(200)
+                            self.send_header("Content-Type", "application/json; charset=utf-8")
+                            self.send_header("Cache-Control", "no-store")
+                            self.end_headers()
+                            if send_body:
+                                self.wfile.write(body)
+                            return
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/plain; charset=utf-8")
+                        self.send_header("Cache-Control", "no-store")
+                        self.end_headers()
+                        if send_body:
+                            self.wfile.write(_DEVICE_BLOCKED_PAYLOAD)
+                        return
+
+                force_app_redirect = (query.get("app") or [""])[0] == "1" or has_explicit_client_hint
+                force_web_page = (query.get("web") or [""])[0] == "1"
+                if force_web_page or (not force_app_redirect and not is_subscription_target(target)):
+                    self.send_response(302)
+                    self.send_header("Location", target)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                elif is_subscription_target(target):
+                    self.send_response(302)
+                    app_target = target + ("&" if "?" in target else "?") + "app=1"
+                    self.send_header("Location", app_target)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                else:
+                    self.send_response(302)
+                    self.send_header("Location", target)
+                    self.send_header("Cache-Control", "no-store")
+                    self.end_headers()
+                return
+
         self.send_response(404)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
@@ -1688,10 +2827,24 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(b"Not found")
 
     def do_GET(self):
-        self._handle_redirect(send_body=True)
+        try:
+            self._handle_redirect(send_body=True)
+        except Exception as e:
+            logging.error("Unhandled error in do_GET: %s", e, exc_info=True)
+            try:
+                self.send_error(500)
+            except Exception:
+                pass
 
     def do_HEAD(self):
-        self._handle_redirect(send_body=False)
+        try:
+            self._handle_redirect(send_body=False)
+        except Exception as e:
+            logging.error("Unhandled error in do_HEAD: %s", e, exc_info=True)
+            try:
+                self.send_error(500)
+            except Exception:
+                pass
 
     def log_message(self, format, *args):
         return

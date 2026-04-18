@@ -66,7 +66,7 @@ def _extract_bot_handled_keys(bot_text: str) -> set[str]:
 def _normalize_to_runtime_key(markup_key: str) -> str:
     key = markup_key.strip()
     if key.startswith("smartkamavpn_"):
-        return "velvet_" + key[len("smartkamavpn_") :]
+        return key  # already smartkamavpn_ prefix
     return key
 
 

@@ -332,6 +332,12 @@ class Guard:
         finally:
             conn.close()
 
+    def _public_url(self, path: str, port: int) -> str:
+        port_suffix = f":{port}" if port not in (443, 0) else ""
+        if not path.startswith("/"):
+            path = f"/{path}"
+        return f"https://{self.args.sub_domain}{port_suffix}{path}"
+
     def _check_subscription_url(self, url: str, expected_host: str, expected_ip: str) -> Tuple[bool, Dict[str, object]]:
         try:
             resp = self.session.get(url, timeout=20)
@@ -513,19 +519,31 @@ class Guard:
             return False
 
         self.log("using sub_id", sub_id)
-        sub_url = f"https://{self.args.sub_domain}:{self.args.public_port}/sub/{sub_id}"
+        sub_url = self._public_url(f"/sub/{sub_id}", self.args.public_port)
         _, sub_meta = self._check_subscription_url(sub_url, self.args.sub_domain, self.args.server_ip)
         if sub_meta:
             self.log("native sub", json.dumps(sub_meta, ensure_ascii=False))
 
         token = self._find_or_create_short_token(sub_id, create_if_missing=False)
         if token:
-            short_url = f"https://{self.args.sub_domain}:{self.args.public_port}/s/{token}?raw=1"
+            short_url = self._public_url(f"/s/{token}?raw=1", self.args.public_port)
             _, short_meta = self._check_subscription_url(short_url, self.args.sub_domain, self.args.server_ip)
             if short_meta:
                 self.log("shortlink sub", json.dumps(short_meta, ensure_ascii=False))
         else:
             self.add_issue("short_token_missing", f"No short token found for sub_id={sub_id}", "warning", True)
+
+        if self.args.user_facing_port not in (self.args.public_port, 0):
+            user_sub_url = self._public_url(f"/sub/{sub_id}", self.args.user_facing_port)
+            _, user_sub_meta = self._check_subscription_url(user_sub_url, self.args.sub_domain, self.args.server_ip)
+            if user_sub_meta:
+                self.log("user-facing native sub", json.dumps(user_sub_meta, ensure_ascii=False))
+
+            if token:
+                user_short_url = self._public_url(f"/s/{token}?raw=1", self.args.user_facing_port)
+                _, user_short_meta = self._check_subscription_url(user_short_url, self.args.sub_domain, self.args.server_ip)
+                if user_short_meta:
+                    self.log("user-facing shortlink sub", json.dumps(user_short_meta, ensure_ascii=False))
 
         self.log("== diagnose done ==")
         return not any(i.severity == "error" for i in self.issues)
@@ -676,19 +694,29 @@ class Guard:
             self.add_issue("smoke_subid_missing", "Smoke failed: cannot find sub_id (pass --sub-id)", "error", False)
             return False
 
-        native = f"https://{self.args.sub_domain}:{self.args.public_port}/sub/{sub_id}"
+        native = self._public_url(f"/sub/{sub_id}", self.args.public_port)
         native_ok, _ = self._check_subscription_url(native, self.args.sub_domain, self.args.server_ip)
 
         token = self._find_or_create_short_token(sub_id, create_if_missing=True)
         short_ok = False
         if token:
-            short = f"https://{self.args.sub_domain}:{self.args.public_port}/s/{token}?raw=1"
+            short = self._public_url(f"/s/{token}?raw=1", self.args.public_port)
             short_ok, _ = self._check_subscription_url(short, self.args.sub_domain, self.args.server_ip)
         else:
             self.add_issue("smoke_short_missing", "Smoke failed: short token missing", "error", False)
 
+        user_facing_ok = True
+        if self.args.user_facing_port not in (self.args.public_port, 0):
+            user_native = self._public_url(f"/sub/{sub_id}", self.args.user_facing_port)
+            user_native_ok, _ = self._check_subscription_url(user_native, self.args.sub_domain, self.args.server_ip)
+            user_short_ok = short_ok
+            if token:
+                user_short = self._public_url(f"/s/{token}?raw=1", self.args.user_facing_port)
+                user_short_ok, _ = self._check_subscription_url(user_short, self.args.sub_domain, self.args.server_ip)
+            user_facing_ok = user_native_ok and user_short_ok
+
         self.log("== smoke done ==")
-        return native_ok and short_ok
+        return native_ok and short_ok and user_facing_ok
 
 
 def parse_args() -> argparse.Namespace:
@@ -699,6 +727,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--sub-domain", default=os.getenv("SMARTKAMA_SUB_DOMAIN", "sub.smartkama.ru"))
     parser.add_argument("--server-ip", default=os.getenv("SMARTKAMA_SERVER_IP", "72.56.100.45"))
     parser.add_argument("--public-port", type=int, default=int(os.getenv("SMARTKAMA_SUB_PUBLIC_PORT", "2096")))
+    parser.add_argument("--user-facing-port", type=int, default=int(os.getenv("SMARTKAMA_SUB_USER_FACING_PORT", "443")))
     parser.add_argument("--internal-sub-port", type=int, default=int(os.getenv("SMARTKAMA_SUB_INTERNAL_PORT", "2097")))
     parser.add_argument("--shortlink-port", type=int, default=int(os.getenv("SMARTKAMA_SHORTLINK_PORT", "9101")))
     parser.add_argument("--sub-id", default=os.getenv("SMARTKAMA_SUB_ID", ""))

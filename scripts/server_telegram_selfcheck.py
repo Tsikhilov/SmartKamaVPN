@@ -100,8 +100,9 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Telegram API self-check for SmartKama bots")
     parser.add_argument("--bot-db", default=DEFAULT_BOT_DB)
     parser.add_argument("--check-client", action="store_true")
-    parser.add_argument("--send-test-message", action="store_true", default=True)
+    parser.add_argument("--send-test-message", action="store_true", default=False)
     parser.add_argument("--no-send-test-message", action="store_false", dest="send_test_message")
+    parser.add_argument("--send-client-test-message", action="store_true", default=False)
     parser.add_argument("--strict-client", action="store_true")
     return parser.parse_args()
 
@@ -141,7 +142,11 @@ def main() -> int:
         print(msg + " (warning)")
         return 0
 
-    client_ok = _check_bot("client", client_token, admin_chat_id, args.send_test_message)
+    client_send_test = args.send_test_message and args.send_client_test_message
+    if args.send_test_message and not client_send_test:
+        print("[client] sendMessage skipped by default; use --send-client-test-message to allow it")
+
+    client_ok = _check_bot("client", client_token, admin_chat_id, client_send_test)
     if client_ok:
         return 0
 
