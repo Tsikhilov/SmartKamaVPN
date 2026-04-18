@@ -368,7 +368,15 @@ def owner_info_template(username, card_number_card, card_name):
     username = username if username else "-"
     card_number_card = card_number_card if card_number_card else "-"
     card_name = card_name if card_name else "-"
-    if LANG == 'FA':
+    if LANG == 'RU':
+        return (
+            f"<b>Информация об оплате</b>\n"
+            f"────────────────────\n"
+            f"<b>Поддержка (Telegram):</b> {username}\n"
+            f"<b>Номер карты:</b> {card_number_card}\n"
+            f"<b>Владелец карты:</b> {card_name}"
+        )
+    elif LANG == 'FA':
         return f"""
 <b> اطلاعات مالک </b>
 --------------------------------
@@ -376,19 +384,25 @@ def owner_info_template(username, card_number_card, card_name):
 <b> شماره کارت بانکی: </b> {card_number_card}
 <b> نام صاحب حساب بانکی: </b> {card_name}
 """
-    elif LANG == 'EN':
-        return f"""
-<b> Owner Info </b>
---------------------------------
-<b> Telegram Support Username: </b> {username} 
-<b> Bank Card Number: </b> {card_number_card}
-<b> Bank Card Name: </b> {card_name}
-"""
+    else:
+        return (
+            f"<b>Owner Info</b>\n"
+            f"────────────────────\n"
+            f"<b>Telegram Support Username:</b> {username}\n"
+            f"<b>Bank Card Number:</b> {card_number_card}\n"
+            f"<b>Bank Card Name:</b> {card_name}"
+        )
 
 
 # About Bot Message Template
 def about_template():
-    if LANG == 'FA':
+    if LANG == 'RU':
+        return (
+            f"🤖 <b>SmartKamaVPN Bot</b>\n\n"
+            f"<a href='https://github.com/Tsikhilov/SmartKamaVPN'>GitHub</a>\n\n"
+            f"Версия: {VERSION}"
+        )
+    elif LANG == 'FA':
         return f"""
 🤖هیدی بات، راحت تر از همیشه!
 
@@ -400,13 +414,9 @@ def about_template():
 
 نسخه: {VERSION}
 """
-    elif LANG == 'EN':
-        return f"""
-🤖Hiddify Bot, Easier than ever!
-
-<a href='https://github.com/B3H1Z/Hiddify-Telegram-Bot'> Project </a>|<a href='https://t.me/HidyBotGroup'> Support Group </a>
-
-This project is developed for free and your financial support can be motivating for further development❤️
-
-Version: {VERSION}
-"""
+    else:
+        return (
+            f"🤖 <b>SmartKamaVPN Bot</b>\n\n"
+            f"<a href='https://github.com/Tsikhilov/SmartKamaVPN'>GitHub</a>\n\n"
+            f"Version: {VERSION}"
+        )
