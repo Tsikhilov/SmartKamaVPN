@@ -34,6 +34,9 @@ BOT_BACKUP_LOC = os.path.join(_BASE_DIR, "Backup", "Bot")
 API_PATH = "/api/v2"
 SMARTKAMAVPN_BOT_ID = "@SmartKamaVPNbot"
 
+# Welcome banner (Telegram file_id or URL). Set to None to disable.
+WELCOME_BANNER = os.environ.get("WELCOME_BANNER", None)
+
 # if directories not exists, create it
 for _d in [LOG_DIR, BACKUP_LOC, BOT_BACKUP_LOC, RECEIPTIONS_LOC,
            os.path.join(_BASE_DIR, "Database")]:
@@ -94,6 +97,7 @@ def load_server_url(db):
 ADMINS_ID, TELEGRAM_TOKEN, CLIENT_TOKEN, PANEL_URL, LANG, PANEL_ADMIN_ID = None, None, None, None, None, None
 HIDDIFY_API_KEY = None  # deprecated, оставлен для совместимости
 YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY = None, None
+CRYPTOPAY_API_TOKEN = None
 
 # Active panel provider for API adapter: 3xui (default) | marzban
 PANEL_PROVIDER = os.getenv("SMARTKAMA_PANEL_PROVIDER", "3xui").strip().lower()
@@ -114,6 +118,21 @@ MARZBAN_PASSWORD = os.getenv("MARZBAN_PASSWORD", "")
 MARZBAN_ACCESS_TOKEN = os.getenv("MARZBAN_ACCESS_TOKEN", "")
 MARZBAN_TLS_VERIFY = os.getenv("MARZBAN_TLS_VERIFY", "false").strip().lower() in ("1", "true", "yes", "on")
 MARZBAN_INBOUND_TAGS = os.getenv("MARZBAN_INBOUND_TAGS", "")
+
+# MTProto proxy settings
+MTPROTO_ENABLED = os.getenv("SMARTKAMA_MTPROTO_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+MTPROTO_SERVER = os.getenv("SMARTKAMA_MTPROTO_SERVER", "")
+MTPROTO_PORT = int(os.getenv("SMARTKAMA_MTPROTO_PORT", "3128"))
+MTPROTO_SECRET = os.getenv("SMARTKAMA_MTPROTO_SECRET", "")
+MTPROTO_PROMOTE_TAG = os.getenv("SMARTKAMA_MTPROTO_PROMOTE_TAG", "")
+
+# WhatsApp proxy settings
+WHATSAPP_PROXY_ENABLED = os.getenv("SMARTKAMA_WHATSAPP_PROXY_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+WHATSAPP_PROXY_SERVER = os.getenv("SMARTKAMA_WHATSAPP_PROXY_SERVER", "")
+
+# Signal proxy settings
+SIGNAL_PROXY_ENABLED = os.getenv("SMARTKAMA_SIGNAL_PROXY_ENABLED", "false").strip().lower() in ("1", "true", "yes", "on")
+SIGNAL_PROXY_DOMAIN = os.getenv("SMARTKAMA_SIGNAL_PROXY_DOMAIN", "")
 
 
 def set_config_variables(configs, server_url):
@@ -136,9 +155,13 @@ def set_config_variables(configs, server_url):
 
     global ADMINS_ID, TELEGRAM_TOKEN, PANEL_URL, LANG, PANEL_ADMIN_ID, CLIENT_TOKEN, HIDDIFY_API_KEY
     global YOOKASSA_SHOP_ID, YOOKASSA_SECRET_KEY
+    global CRYPTOPAY_API_TOKEN
     global PANEL_PROVIDER
     global THREEXUI_USERNAME, THREEXUI_PASSWORD, THREEXUI_PANEL_URL, THREEXUI_WEB_BASE_PATH, THREEXUI_INBOUND_ID, THREEXUI_INBOUND_IDS, THREEXUI_REALITY_PUBLIC_KEY
     global MARZBAN_PANEL_URL, MARZBAN_USERNAME, MARZBAN_PASSWORD, MARZBAN_ACCESS_TOKEN, MARZBAN_TLS_VERIFY, MARZBAN_INBOUND_TAGS
+    global MTPROTO_ENABLED, MTPROTO_SERVER, MTPROTO_PORT, MTPROTO_SECRET, MTPROTO_PROMOTE_TAG
+    global WHATSAPP_PROXY_ENABLED, WHATSAPP_PROXY_SERVER
+    global SIGNAL_PROXY_ENABLED, SIGNAL_PROXY_DOMAIN
 
     if isinstance(raw_admin_ids, str) and raw_admin_ids.strip().startswith("["):
         ADMINS_ID = json.loads(raw_admin_ids)
@@ -174,7 +197,11 @@ def set_config_variables(configs, server_url):
     THREEXUI_REALITY_PUBLIC_KEY = (configs.get("threexui_reality_public_key") or os.getenv("THREEXUI_REALITY_PUBLIC_KEY") or THREEXUI_REALITY_PUBLIC_KEY or "").strip()
     _inbound_id = configs.get("threexui_inbound_id") or os.getenv("THREEXUI_INBOUND_ID")
     if _inbound_id:
-        THREEXUI_INBOUND_ID = int(_inbound_id)
+        try:
+            THREEXUI_INBOUND_ID = int(_inbound_id)
+        except (ValueError, TypeError):
+            logging.warning(f"Invalid THREEXUI_INBOUND_ID value: {_inbound_id!r}, using default 1")
+            THREEXUI_INBOUND_ID = 1
 
     # Marzban settings (для поэтапной миграции)
     MARZBAN_PANEL_URL = (configs.get("marzban_panel_url") or os.getenv("MARZBAN_PANEL_URL") or MARZBAN_PANEL_URL or "").strip()
@@ -185,9 +212,35 @@ def set_config_variables(configs, server_url):
     _marzban_tls_verify = (configs.get("marzban_tls_verify") or os.getenv("MARZBAN_TLS_VERIFY") or str(MARZBAN_TLS_VERIFY)).strip().lower()
     MARZBAN_TLS_VERIFY = _marzban_tls_verify in ("1", "true", "yes", "on")
 
+    # MTProto proxy settings
+    _mtproto_enabled = (configs.get("mtproto_enabled") or os.getenv("SMARTKAMA_MTPROTO_ENABLED") or str(MTPROTO_ENABLED)).strip().lower()
+    MTPROTO_ENABLED = _mtproto_enabled in ("1", "true", "yes", "on")
+    MTPROTO_SERVER = (configs.get("mtproto_server") or os.getenv("SMARTKAMA_MTPROTO_SERVER") or MTPROTO_SERVER or "").strip()
+    _mtproto_port = configs.get("mtproto_port") or os.getenv("SMARTKAMA_MTPROTO_PORT")
+    if _mtproto_port:
+        try:
+            MTPROTO_PORT = int(_mtproto_port)
+        except (ValueError, TypeError):
+            pass
+    MTPROTO_SECRET = (configs.get("mtproto_secret") or os.getenv("SMARTKAMA_MTPROTO_SECRET") or MTPROTO_SECRET or "").strip()
+    MTPROTO_PROMOTE_TAG = (configs.get("mtproto_promote_tag") or os.getenv("SMARTKAMA_MTPROTO_PROMOTE_TAG") or MTPROTO_PROMOTE_TAG or "").strip()
+
+    # WhatsApp proxy settings
+    _wa_proxy_enabled = (configs.get("whatsapp_proxy_enabled") or os.getenv("SMARTKAMA_WHATSAPP_PROXY_ENABLED") or str(WHATSAPP_PROXY_ENABLED)).strip().lower()
+    WHATSAPP_PROXY_ENABLED = _wa_proxy_enabled in ("1", "true", "yes", "on")
+    WHATSAPP_PROXY_SERVER = (configs.get("whatsapp_proxy_server") or os.getenv("SMARTKAMA_WHATSAPP_PROXY_SERVER") or WHATSAPP_PROXY_SERVER or "").strip()
+
+    # Signal proxy settings
+    _signal_proxy_enabled = (configs.get("signal_proxy_enabled") or os.getenv("SMARTKAMA_SIGNAL_PROXY_ENABLED") or str(SIGNAL_PROXY_ENABLED)).strip().lower()
+    SIGNAL_PROXY_ENABLED = _signal_proxy_enabled in ("1", "true", "yes", "on")
+    SIGNAL_PROXY_DOMAIN = (configs.get("signal_proxy_domain") or os.getenv("SMARTKAMA_SIGNAL_PROXY_DOMAIN") or SIGNAL_PROXY_DOMAIN or "").strip()
+
     # Load YooKassa settings
     YOOKASSA_SHOP_ID = configs.get("yookassa_shop_id")
     YOOKASSA_SECRET_KEY = configs.get("yookassa_secret_key")
+
+    # Load CryptoPay settings
+    CRYPTOPAY_API_TOKEN = configs.get("cryptopay_api_token")
 
 
 def panel_url_validator(url):

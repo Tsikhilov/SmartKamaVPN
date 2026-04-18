@@ -109,7 +109,7 @@ def get_request(url):
     logging.info(f"GET Request to {privacy_friendly_logging_request(url)}")
     global session
     try:
-        req = session.get(url)
+        req = session.get(url, timeout=10)
         logging.info(f"GET Request to {privacy_friendly_logging_request(url)} - Status Code: {req.status_code}")
         return req
     except requests.exceptions.ConnectionError as e:
@@ -131,7 +131,7 @@ def post_request(url, data):
     logging.info(f"POST Request to {privacy_friendly_logging_request(url)} - Data: {data}")
     global session
     try:
-        req = session.post(url, data=data)
+        req = session.post(url, data=data, timeout=10)
         return req
     except requests.exceptions.ConnectionError as e:
         logging.exception(f"Connection Exception: {e}")
@@ -215,40 +215,44 @@ def dict_process(url, users_dict, sub_id=None, server_id=None):
     panel_parts = [p for p in urlparse(url).path.split('/') if p]
     panel_path = panel_parts[0] if panel_parts else None
     sub_domain = os.getenv("SMARTKAMA_SUB_DOMAIN", "sub.smartkama.ru").strip() or "sub.smartkama.ru"
-    sub_port = int(os.getenv("SMARTKAMA_SUB_PORT", "443"))
+    public_sub_port = int(os.getenv("SMARTKAMA_SUB_PUBLIC_PORT", "443"))
     logging.info(f"Parse users page")
     if not users_dict:
         return False
     users_list = []
     for user in users_dict:
+        user_uuid = user.get('uuid')
+        if not user_uuid:
+            logging.warning(f"Skipping user without uuid: {user.get('name', '?')}")
+            continue
         user_sub_id = str(user.get('sub_id') or '')[:8]
         if not user_sub_id:
-            user_sub_id = str(user['uuid'])[:8]
+            user_sub_id = str(user_uuid)[:8]
 
         if panel_path:
-            panel_user_link = f"{BASE_URL}/{panel_path}/{user['uuid']}/"
+            panel_user_link = f"{BASE_URL}/{panel_path}/{user_uuid}/"
         else:
-            panel_user_link = f"{BASE_URL}/{user['uuid']}/"
+            panel_user_link = f"{BASE_URL}/{user_uuid}/"
 
-        # User-facing click-through should open subscription URL, not panel API endpoint.
-        _sub_port_sfx = f":{sub_port}" if sub_port not in (443, 0) else ""
-        user_link = f"https://{sub_domain}{_sub_port_sfx}/{user_sub_id}"
+        # User-facing click-through should open the public subscription page on 443 when available.
+        _public_port_sfx = f":{public_sub_port}" if public_sub_port not in (443, 0) else ""
+        user_link = f"https://{sub_domain}{_public_port_sfx}/p/{user_sub_id}"
 
         users_list.append({
-            "name": user['name'],
+            "name": user.get('name', ''),
             "usage": {
-                'usage_limit_GB': round(user['usage_limit_GB'], 2),
-                'current_usage_GB': round(user['current_usage_GB'], 2),
-                'remaining_usage_GB': calculate_remaining_usage(user['usage_limit_GB'], user['current_usage_GB'])
+                'usage_limit_GB': round(user.get('usage_limit_GB', 0), 2),
+                'current_usage_GB': round(user.get('current_usage_GB', 0), 2),
+                'remaining_usage_GB': calculate_remaining_usage(user.get('usage_limit_GB', 0), user.get('current_usage_GB', 0))
             },
-            "remaining_day": calculate_remaining_days(user['start_date'], user['package_days']),
-            "comment": user['comment'],
-            "last_connection": calculate_remaining_last_online(user['last_online']) if user['last_online'] else None,
-            "uuid": user['uuid'],
+            "remaining_day": calculate_remaining_days(user.get('start_date'), user.get('package_days', 0)),
+            "comment": user.get('comment', ''),
+            "last_connection": calculate_remaining_last_online(user['last_online']) if user.get('last_online') else None,
+            "uuid": user_uuid,
             "link": user_link,
             "panel_link": panel_user_link,
-            "mode": user['mode'],
-            "enable": user['enable'],
+            "mode": user.get('mode', ''),
+            "enable": user.get('enable', True),
             "sub_id": sub_id,
             "server_id": server_id
         })
@@ -268,44 +272,95 @@ def user_info(url, uuid):
     return False
 
 
-# Get sub links - return dict of sub links (3x-ui format)
-def sub_links(uuid, url=None):
+# Get sub links - return dict of sub links
+def sub_links(uuid, url=None, telegram_id=None):
     from config import THREEXUI_PANEL_URL
+    import config as _cfg
+    from Utils import marzban_api as _mapi
+
     SUB_DOMAIN = os.getenv("SMARTKAMA_SUB_DOMAIN", "sub.smartkama.ru").strip() or "sub.smartkama.ru"
     SUB_PORT = int(os.getenv("SMARTKAMA_SUB_PORT", "443"))
+    PUBLIC_SUB_PORT = int(os.getenv("SMARTKAMA_SUB_PUBLIC_PORT", "443"))
     _port_sfx = f":{SUB_PORT}" if SUB_PORT not in (443, 0) else ""
+    _public_port_sfx = f":{PUBLIC_SUB_PORT}" if PUBLIC_SUB_PORT not in (443, 0) else ""
 
-    # Попробуем получить subId клиента через API
-    try:
-        client_data = api.find(url=THREEXUI_PANEL_URL, uuid=uuid)
-        sub_id = (client_data.get("sub_id") or "") if client_data else ""
-    except Exception:
-        sub_id = ""
+    provider = str(getattr(_cfg, "PANEL_PROVIDER", "3xui") or "3xui").strip().lower()
 
-    # Если subId не получен — используем первые 8 символов UUID (наш шаблон создания)
-    if not sub_id:
-        sub_id = str(uuid)[:8]
+    sub_base_raw = None
 
-    # Raw endpoint used for import/parsing in bot internals.
-    sub_base_raw = f"https://{SUB_DOMAIN}{_port_sfx}/sub/{sub_id}"
-    # Public pretty link used in user-facing messages.
-    public_sub_link = f"https://{SUB_DOMAIN}{_port_sfx}/{sub_id}"
+    if provider == "marzban":
+        # Для Marzban берём subscription_url напрямую из API — он содержит правильный токен
+        try:
+            user_raw = _mapi._resolve_user_raw(str(uuid))
+            if user_raw:
+                marz_sub_url = str(user_raw.get("subscription_url") or "").strip()
+                if marz_sub_url:
+                    sub_base_raw = marz_sub_url
+        except Exception:
+            pass
 
-    sub = {
-        'sub_link':         sub_base_raw,
-        'sub_link_b64':     sub_base_raw,
-        'sub_link_auto':    sub_base_raw,
-        'sub_link_raw':     sub_base_raw,
-        'sub_link_auto_raw': sub_base_raw,
-        'public_sub_link':  public_sub_link,
-        'clash_configs':    f"{sub_base_raw}?config=clash",
-        'hiddify_configs':  sub_base_raw,
-        'sing_box':         sub_base_raw,
-        'sing_box_full':    sub_base_raw,
-        'home_link':        sub_base_raw,
-        'public_home_link': public_sub_link,
+    if not sub_base_raw:
+        # Fallback: получаем sub_id через api.find (работает для 3x-ui и как fallback для marzban)
+        try:
+            client_data = api.find(url=THREEXUI_PANEL_URL, uuid=uuid)
+            sub_id = (client_data.get("sub_id") or "") if client_data else ""
+        except Exception:
+            sub_id = ""
+        if not sub_id:
+            sub_id = str(uuid)[:8]
+        sub_base_raw = f"https://{SUB_DOMAIN}{_port_sfx}/sub/{sub_id}"
+
+    # Публичная страница: /sub/ → /p/
+    if "/sub/" in sub_base_raw:
+        public_page_link = sub_base_raw.replace("/sub/", "/p/", 1).split("?")[0]
+    else:
+        sub_token = sub_base_raw.rstrip("/").rsplit("/", 1)[-1].split("?")[0]
+        public_page_link = f"https://{SUB_DOMAIN}{_public_port_sfx}/p/{sub_token}"
+
+    # Per-app subscription URLs: Marzban использует ?client=<app>, 3x-ui — другие параметры
+    if provider == "marzban":
+        clash_url = f"{sub_base_raw}?client=clash"
+        hiddify_url = f"{sub_base_raw}?client=hiddify"
+        singbox_url = f"{sub_base_raw}?client=singbox"
+    else:
+        clash_url = f"{sub_base_raw}?config=clash"
+        hiddify_url = sub_base_raw
+        singbox_url = sub_base_raw
+
+    # Append operator hint if user has a preference
+    op_hint = ""
+    if telegram_id:
+        try:
+            configs = USERS_DB.select_str_config()
+            op_key = f"user_operator_{telegram_id}"
+            for c in (configs or []):
+                if c['key'] == op_key and c.get('value') and c['value'] != 'auto':
+                    op_hint = c['value']
+        except Exception:
+            pass
+
+    def _add_op(link):
+        if not op_hint or not link:
+            return link
+        sep = "&" if "?" in link else "?"
+        return f"{link}{sep}op={op_hint}"
+
+    return {
+        'sub_link':         _add_op(sub_base_raw),
+        'sub_link_b64':     _add_op(sub_base_raw),
+        'sub_link_auto':    _add_op(sub_base_raw),
+        'sub_link_raw':     _add_op(sub_base_raw),
+        'sub_link_auto_raw': _add_op(sub_base_raw),
+        'public_sub_link':  _add_op(sub_base_raw),
+        'clash_configs':    _add_op(clash_url),
+        'hiddify_configs':  _add_op(hiddify_url),
+        'sing_box':         _add_op(singbox_url),
+        'sing_box_full':    _add_op(singbox_url),
+        'sing_box_configs': _add_op(singbox_url),
+        'home_link':        public_page_link,
+        'public_home_link': public_page_link,
+        'sub_page':         public_page_link,
     }
-    return sub
 
 
 # Parse sub links
@@ -864,6 +919,9 @@ def restore_json_bot(file):
         return False
                 
             
+    if not json_filename:
+        logging.error("No JSON file found in backup archive")
+        return False
     bk_json_file = os.path.join(extract_path, os.path.basename(json_filename))
     # with open(bk_json_file, 'r') as f:
     #     bk_json_data = json.load(f)

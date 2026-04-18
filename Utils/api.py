@@ -722,6 +722,11 @@ def insert(url=None, name=None, usage_limit_GB=0, package_days=30,
         return new_uuid
     except Exception as e:
         logging.error("API insert error: %s", e)
+        for rollback_inbound in added_inbounds:
+            try:
+                _api("POST", f"/panel/api/inbounds/{rollback_inbound}/delClient/{new_uuid}")
+            except Exception:
+                pass
         return None
 
 
