@@ -460,13 +460,17 @@ def renewal_from_wallet_confirm(message: Message):
     link = f"{BASE_URL}/{urlparse(server['url']).path.split('/')[1]}/{uuid}/"
     user_name = f"<a href='{link}'> {user_info_process['name']} </a>"
     bot_users = USERS_DB.find_user(telegram_id=message.chat.id)
-    if bot_users:
-        bot_user = bot_users[0]
+    if not bot_users:
+        return
+    bot_user = bot_users[0]
     for ADMIN in ADMINS_ID:
-        admin_bot.send_message(ADMIN,
-                               f"""{MESSAGES['ADMIN_NOTIFY_NEW_RENEWAL']} {user_name} {MESSAGES['ADMIN_NOTIFY_NEW_RENEWAL_2']}
+        try:
+            admin_bot.send_message(ADMIN,
+                                   f"""{MESSAGES['ADMIN_NOTIFY_NEW_RENEWAL']} {user_name} {MESSAGES['ADMIN_NOTIFY_NEW_RENEWAL_2']}
 {MESSAGES['SERVER']}<a href='{server['url']}/admin'> {server['title']} </a>
 {MESSAGES['INFO_ID']} <code>{sub['id']}</code>""", reply_markup=notify_to_admin_markup(bot_user))
+        except Exception as e:
+            logging.warning("admin_bot notify renewal failed for %s: %s", ADMIN, e)
 
 
 # Next Step Buy Plan - Send Screenshot
@@ -536,8 +540,11 @@ def next_step_answer_to_admin(message, admin_id):
         bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'], reply_markup=main_menu_keyboard_markup())
         return
     bot_user = bot_users[0]
-    admin_bot.send_message(int(admin_id), f"{MESSAGES['NEW_TICKET_RECEIVED']}\n{MESSAGES['TICKET_TEXT']} {message.text}",
-                           reply_markup=answer_to_user_markup(bot_user,message.chat.id))
+    try:
+        admin_bot.send_message(int(admin_id), f"{MESSAGES['NEW_TICKET_RECEIVED']}\n{MESSAGES['TICKET_TEXT']} {message.text}",
+                               reply_markup=answer_to_user_markup(bot_user,message.chat.id))
+    except Exception as e:
+        logging.warning("admin_bot notify ticket failed for %s: %s", admin_id, e)
     bot.send_message(message.chat.id, MESSAGES['SEND_TICKET_TO_ADMIN_RESPONSE'],
                          reply_markup=main_menu_keyboard_markup())
 
@@ -546,11 +553,15 @@ def next_step_send_ticket_to_admin(message):
     if is_it_cancel(message):
         return
     bot_users = USERS_DB.find_user(telegram_id=message.chat.id)
-    if bot_users:
-        bot_user = bot_users[0]
+    if not bot_users:
+        return
+    bot_user = bot_users[0]
     for ADMIN in ADMINS_ID:
-        admin_bot.send_message(ADMIN, f"{MESSAGES['NEW_TICKET_RECEIVED']}\n{MESSAGES['TICKET_TEXT']} {message.text}",
-                               reply_markup=answer_to_user_markup(bot_user,message.chat.id))
+        try:
+            admin_bot.send_message(ADMIN, f"{MESSAGES['NEW_TICKET_RECEIVED']}\n{MESSAGES['TICKET_TEXT']} {message.text}",
+                                   reply_markup=answer_to_user_markup(bot_user,message.chat.id))
+        except Exception as e:
+            logging.warning("admin_bot notify ticket failed for %s: %s", ADMIN, e)
         bot.send_message(message.chat.id, MESSAGES['SEND_TICKET_TO_ADMIN_RESPONSE'],
                             reply_markup=main_menu_keyboard_markup())
 
@@ -759,13 +770,17 @@ def next_step_send_name_for_buy_from_wallet(message: Message, plan):
     link = f"{BASE_URL}/{urlparse(server['url']).path.split('/')[1]}/{value}/"
     user_name = f"<a href='{link}'> {name} </a>"
     bot_users = USERS_DB.find_user(telegram_id=message.chat.id)
-    if bot_users:
-        bot_user = bot_users[0]
+    if not bot_users:
+        return
+    bot_user = bot_users[0]
     for ADMIN in ADMINS_ID:
-        admin_bot.send_message(ADMIN,
-                               f"""{MESSAGES['ADMIN_NOTIFY_NEW_SUB']} {user_name} {MESSAGES['ADMIN_NOTIFY_CONFIRM']}
+        try:
+            admin_bot.send_message(ADMIN,
+                                   f"""{MESSAGES['ADMIN_NOTIFY_NEW_SUB']} {user_name} {MESSAGES['ADMIN_NOTIFY_CONFIRM']}
 {MESSAGES['SERVER']}<a href='{server['url']}/admin'> {server['title']} </a>
 {MESSAGES['INFO_ID']} <code>{sub_id}</code>""", reply_markup=notify_to_admin_markup(bot_user))
+        except Exception as e:
+            logging.warning("admin_bot notify new sub failed for %s: %s", ADMIN, e)
 
 
 # ----------------------------------- Get Free Test Area -----------------------------------
@@ -820,13 +835,17 @@ def next_step_send_name_for_get_free_test(message: Message, server_id):
     link = f"{BASE_URL}/{urlparse(server['url']).path.split('/')[1]}/{uuid}/"
     user_name = f"<a href='{link}'> {name} </a>"
     bot_users = USERS_DB.find_user(telegram_id=message.chat.id)
-    if bot_users:
-        bot_user = bot_users[0]
+    if not bot_users:
+        return
+    bot_user = bot_users[0]
     for ADMIN in ADMINS_ID:
-        admin_bot.send_message(ADMIN,
-                               f"""{MESSAGES['ADMIN_NOTIFY_NEW_FREE_TEST']} {user_name} {MESSAGES['ADMIN_NOTIFY_CONFIRM']}
+        try:
+            admin_bot.send_message(ADMIN,
+                                   f"""{MESSAGES['ADMIN_NOTIFY_NEW_FREE_TEST']} {user_name} {MESSAGES['ADMIN_NOTIFY_CONFIRM']}
 {MESSAGES['SERVER']}<a href='{server['url']}/admin'> {server['title']} </a>
 {MESSAGES['INFO_ID']} <code>{non_order_id}</code>""", reply_markup=notify_to_admin_markup(bot_user))
+        except Exception as e:
+            logging.warning("admin_bot notify free test failed for %s: %s", ADMIN, e)
 
 
 # ----------------------------------- To QR Area -----------------------------------
