@@ -96,8 +96,8 @@ renew_subscription_dict = {}
 def user_channel_status(user_id):
     try:
         settings = utils.all_configs_settings()
-        if settings['channel_id']:
-            user = bot.get_chat_member(settings['channel_id'], user_id)
+        if settings.get('channel_id'):
+            user = bot.get_chat_member(settings.get('channel_id'), user_id)
             return user.status in ['member', 'administrator', 'creator']
         else:
             return True
@@ -108,12 +108,12 @@ def user_channel_status(user_id):
 
 def is_user_in_channel(user_id):
     settings = all_configs_settings()
-    if settings['force_join_channel'] == 1:
-        if not settings['channel_id']:
+    if settings.get('force_join_channel') == 1:
+        if not settings.get('channel_id'):
             return True
         if not user_channel_status(user_id):
             bot.send_message(user_id, MESSAGES['REQUEST_JOIN_CHANNEL'],
-                             reply_markup=force_join_channel_markup(settings['channel_id']))
+                             reply_markup=force_join_channel_markup(settings.get('channel_id')))
             return False
     return True
 
@@ -397,7 +397,7 @@ def renewal_from_wallet_confirm(message: Message):
         return   
     settings = utils.all_configs_settings()
     #Default renewal mode
-    if settings['renewal_method'] == 1:
+    if settings.get('renewal_method') == 1:
         if user_info_process['remaining_day'] <= 0 or user_info_process['usage']['remaining_usage_GB'] <= 0:
             new_usage_limit = plan_info['size_gb']
             new_package_days = plan_info['days']
@@ -411,7 +411,7 @@ def renewal_from_wallet_confirm(message: Message):
 
 
     #advance renewal mode        
-    elif settings['renewal_method'] == 2:
+    elif settings.get('renewal_method') == 2:
             new_usage_limit = plan_info['size_gb']
             new_package_days = plan_info['days']
             current_usage_GB = 0
@@ -419,14 +419,14 @@ def renewal_from_wallet_confirm(message: Message):
 
     
     #Fair renewal mode
-    elif settings['renewal_method'] == 3:
+    elif settings.get('renewal_method') == 3:
         if user_info_process['remaining_day'] <= 0 or user_info_process['usage']['remaining_usage_GB'] <= 0:
             new_usage_limit = plan_info['size_gb']
             new_package_days = plan_info['days']
             current_usage_GB = 0
             edit_status = api.update(URL, uuid=uuid, usage_limit_GB=new_usage_limit, package_days=new_package_days,start_date=last_reset_time, current_usage_GB=current_usage_GB,comment=f"HidyBot:{sub['id']}")
         else:
-            print(user_info)
+            logging.debug("user_info for fair renewal: %s", user_info)
             new_usage_limit = user_info['usage_limit_GB'] + plan_info['size_gb']
             new_package_days = plan_info['days'] + user_info['package_days']
             edit_status = api.update(URL, uuid=uuid, usage_limit_GB=new_usage_limit,package_days=new_package_days,last_reset_time=last_reset_time,comment=f"HidyBot:{sub['id']}")
@@ -789,7 +789,7 @@ def next_step_send_name_for_get_free_test(message: Message, server_id):
     server = server[0]
     URL = server['url'] + API_PATH
     # uuid = ADMIN_DB.add_default_user(name, test_user_days, test_user_size_gb, int(PANEL_ADMIN_ID), test_user_comment)
-    uuid = api.insert(URL, name=name, usage_limit_GB=settings['test_sub_size_gb'], package_days=settings['test_sub_days'],
+    uuid = api.insert(URL, name=name, usage_limit_GB=settings.get('test_sub_size_gb'), package_days=settings.get('test_sub_days'),
                       comment=test_user_comment)
     if not uuid:
         bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'],
@@ -912,13 +912,13 @@ def next_step_increase_wallet_balance(message):
         return
 
     charge_wallet['amount'] = str(amount)
-    if settings['three_random_num_price'] == 1:
+    if settings.get('three_random_num_price') == 1:
         charge_wallet['amount'] = utils.replace_last_three_with_random(str(amount))
 
     charge_wallet['id'] = random.randint(1000000, 9999999)
     # Send 0 to identify wallet balance charge
     bot.send_message(message.chat.id,
-                     owner_info_template(settings['card_number'], settings['card_holder'], charge_wallet['amount']),
+                     owner_info_template(settings.get('card_number'), settings.get('card_holder'), charge_wallet['amount']),
                      reply_markup=send_screenshot_markup(plan_id=charge_wallet['id']))
 
 def increase_wallet_balance_specific(message,amount):
@@ -932,14 +932,14 @@ def increase_wallet_balance_specific(message,amount):
                 bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'])
                 return
     charge_wallet['amount'] = str(amount)
-    if settings['three_random_num_price'] == 1:
+    if settings.get('three_random_num_price') == 1:
         charge_wallet['amount'] = utils.replace_last_three_with_random(str(amount))
 
     charge_wallet['id'] = random.randint(1000000, 9999999)
 
     # Send 0 to identify wallet balance charge
     bot.send_message(message.chat.id,
-                     owner_info_template(settings['card_number'], settings['card_holder'], charge_wallet['amount']),
+                     owner_info_template(settings.get('card_number'), settings.get('card_holder'), charge_wallet['amount']),
                      reply_markup=send_screenshot_markup(plan_id=charge_wallet['id']))
     
 
@@ -1155,7 +1155,7 @@ def _handle_callback_query(call: CallbackQuery):
         increase_wallet_balance_specific(call.message,value)
     elif key == 'renewal_subscription':
         settings = utils.all_configs_settings()
-        if not settings['renewal_subscription_status']:
+        if not settings.get('renewal_subscription_status'):
             bot.send_message(call.message.chat.id, MESSAGES['RENEWAL_SUBSCRIPTION_CLOSED'],
                              reply_markup=main_menu_keyboard_markup())
             return
@@ -1186,8 +1186,8 @@ def _handle_callback_query(call: CallbackQuery):
                              reply_markup=main_menu_keyboard_markup())
             return
         user_info_process = user_info_process[0]
-        if settings['renewal_method'] == 2:
-            if user_info_process['remaining_day'] > settings['advanced_renewal_days'] and user_info_process['usage']['remaining_usage_GB'] > settings['advanced_renewal_usage']:
+        if settings.get('renewal_method') == 2:
+            if user_info_process['remaining_day'] > settings.get('advanced_renewal_days', 0) and user_info_process['usage']['remaining_usage_GB'] > settings.get('advanced_renewal_usage', 0):
                 bot.send_message(call.message.chat.id, renewal_unvalable_template(settings),
                                  reply_markup=main_menu_keyboard_markup())
                 return
@@ -1410,11 +1410,11 @@ def _handle_callback_query(call: CallbackQuery):
     # manual
     elif key == "msg_manual":
         settings = utils.all_configs_settings()
-        android_msg = settings['msg_manual_android'] if settings['msg_manual_android'] else MESSAGES['MANUAL_ANDROID']
-        ios_msg = settings['msg_manual_ios'] if settings['msg_manual_ios'] else MESSAGES['MANUAL_IOS']
-        win_msg = settings['msg_manual_windows'] if settings['msg_manual_windows'] else MESSAGES['MANUAL_WIN']
-        mac_msg = settings['msg_manual_mac'] if settings['msg_manual_mac'] else MESSAGES['MANUAL_MAC']
-        linux_msg = settings['msg_manual_linux'] if settings['msg_manual_linux'] else MESSAGES['MANUAL_LIN']
+        android_msg = settings.get('msg_manual_android') or MESSAGES['MANUAL_ANDROID']
+        ios_msg = settings.get('msg_manual_ios') or MESSAGES['MANUAL_IOS']
+        win_msg = settings.get('msg_manual_windows') or MESSAGES['MANUAL_WIN']
+        mac_msg = settings.get('msg_manual_mac') or MESSAGES['MANUAL_MAC']
+        linux_msg = settings.get('msg_manual_linux') or MESSAGES['MANUAL_LIN']
         if value == 'android':
             bot.send_message(call.message.chat.id, android_msg, reply_markup=main_menu_keyboard_markup())
         elif value == 'ios':
@@ -1646,7 +1646,7 @@ def start_bot(message: Message):
         return
 
     settings = utils.all_configs_settings()
-    MESSAGES['WELCOME'] = MESSAGES['WELCOME'] if not settings['msg_user_start'] else settings['msg_user_start']
+    MESSAGES['WELCOME'] = settings.get('msg_user_start') or MESSAGES['WELCOME']
 
     # Handle referral deep link: /start ref_<telegram_id>
     referrer_id = None

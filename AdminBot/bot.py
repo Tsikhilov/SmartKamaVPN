@@ -2254,7 +2254,7 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_min_depo":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {utils.rial_to_toman(settings['min_deposit_amount'])}\n{MESSAGES['USERS_BOT_SETTING_MIN_DEPO']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {utils.rial_to_toman(settings.get('min_deposit_amount', 0))}\n{MESSAGES['USERS_BOT_SETTING_MIN_DEPO']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_min_depo)
 
@@ -2274,13 +2274,13 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_channel_id":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['channel_id']}\n{MESSAGES['USERS_BOT_SETTING_CHANNEL_ID']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('channel_id', '')}\n{MESSAGES['USERS_BOT_SETTING_CHANNEL_ID']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_channel_id)
 
     elif key == "users_bot_settings_force_join":
         settings = utils.all_configs_settings()
-        if not settings['channel_id']:
+        if not settings.get('channel_id'):
             bot.send_message(call.message.chat.id, MESSAGES['ERROR_CHANNEL_ID_NOT_SET'])
             return
         if value == "1":
@@ -2304,7 +2304,7 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_visible_sub":
         settings = utils.all_configs_settings()
         row_key = value
-        current_status = settings[row_key]
+        current_status = settings.get(row_key)
         if current_status == 1:
             edit_config = USERS_DB.edit_bool_config(row_key, value=False)
             if not edit_config:
@@ -2322,7 +2322,7 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_set_welcome_msg":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['msg_user_start']}\n{MESSAGES['USERS_BOT_SETTING_WELCOME_MSG']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('msg_user_start', '')}\n{MESSAGES['USERS_BOT_SETTING_WELCOME_MSG']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_welcome_msg)
 
@@ -2332,7 +2332,7 @@ def _handle_admin_callback(call: CallbackQuery):
 
     elif key == "users_bot_settings_set_faq_msg":
         settings = utils.all_configs_settings()
-        faq_text = settings['msg_faq']
+        faq_text = settings.get('msg_faq', '')
         msg = call.message
         bot.send_message(call.message.chat.id,
                          f"{MESSAGES['CURRENT_VALUE']}: {faq_text}\n{MESSAGES['USERS_BOT_SETTING_FAQ_MSG']}",
@@ -2356,7 +2356,7 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_test_sub":
         settings = utils.all_configs_settings()
         row_key = value
-        current_status = settings['test_subscription']
+        current_status = settings.get('test_subscription')
         if current_status == 1:
             edit_config = USERS_DB.edit_bool_config(row_key, value=False)
             if not edit_config:
@@ -2372,13 +2372,13 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_test_sub_size":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['test_sub_size_gb']} {MESSAGES['GB']}\n{MESSAGES['USERS_BOT_SETTINGS_TEST_SUB_USAGE']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('test_sub_size_gb', 0)} {MESSAGES['GB']}\n{MESSAGES['USERS_BOT_SETTINGS_TEST_SUB_USAGE']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_test_sub_size)
     elif key == "users_bot_settings_test_sub_days":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['test_sub_days']} {MESSAGES['DAY']}\n{MESSAGES['USERS_BOT_SETTINGS_TEST_SUB_DAYS']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('test_sub_days', 0)} {MESSAGES['DAY']}\n{MESSAGES['USERS_BOT_SETTINGS_TEST_SUB_DAYS']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_test_sub_days)
 
@@ -2392,7 +2392,7 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_notif_reminder":
         settings = utils.all_configs_settings()
         row_key = value
-        current_status = settings['reminder_notification']
+        current_status = settings.get('reminder_notification')
         if current_status == 1:
             edit_config = USERS_DB.edit_bool_config(row_key, value=False)
             if not edit_config:
@@ -2410,13 +2410,13 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_notif_reminder_usage":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['reminder_notification_usage']} {MESSAGES['GB']}\n{MESSAGES['USERS_BOT_SETTINGS_NOTIF_REMINDER_USAGE']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('reminder_notification_usage', 0)} {MESSAGES['GB']}\n{MESSAGES['USERS_BOT_SETTINGS_NOTIF_REMINDER_USAGE']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_notif_reminder_usage)
     elif key == "users_bot_settings_notif_reminder_days":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['reminder_notification_days']} {MESSAGES['DAY']}\n{MESSAGES['USERS_BOT_SETTINGS_NOTIF_REMINDER_DAYS']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('reminder_notification_days', 0)} {MESSAGES['DAY']}\n{MESSAGES['USERS_BOT_SETTINGS_NOTIF_REMINDER_DAYS']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_notif_reminder_days)
     elif key == "users_bot_settings_panel_manual_menu":
@@ -2425,7 +2425,7 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_panel_manual":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings[value]}\n{MESSAGES['USERS_BOT_SETTINGS_PANEL_MANUAL']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get(value, '')}\n{MESSAGES['USERS_BOT_SETTINGS_PANEL_MANUAL']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_panel_manual, value)
     elif key == "users_bot_settings_backup_bot":
@@ -2494,13 +2494,13 @@ def _handle_admin_callback(call: CallbackQuery):
     elif key == "users_bot_settings_renewal_method_advanced_days":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['advanced_renewal_days']} {MESSAGES['DAY']}\n{MESSAGES['USERS_BOT_SETTINGS_RENEWAL_METHOD_ADVANCED_DAYS']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('advanced_renewal_days', 0)} {MESSAGES['DAY']}\n{MESSAGES['USERS_BOT_SETTINGS_RENEWAL_METHOD_ADVANCED_DAYS']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_renewal_method_advanced_days)
     elif key == "users_bot_settings_renewal_method_advanced_usage":
         settings = utils.all_configs_settings()
         bot.send_message(call.message.chat.id,
-                         f"{MESSAGES['CURRENT_VALUE']}: {settings['advanced_renewal_usage']} {MESSAGES['GB']}\n{MESSAGES['USERS_BOT_SETTINGS_RENEWAL_METHOD_ADVANCED_USAGE']}",
+                         f"{MESSAGES['CURRENT_VALUE']}: {settings.get('advanced_renewal_usage', 0)} {MESSAGES['GB']}\n{MESSAGES['USERS_BOT_SETTINGS_RENEWAL_METHOD_ADVANCED_USAGE']}",
                          reply_markup=markups.while_edit_user_markup())
         bot.register_next_step_handler(call.message, users_bot_settings_renewal_method_advanced_usage)
     # User Bot Settings  - Order Status Callback
