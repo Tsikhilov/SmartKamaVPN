@@ -200,6 +200,9 @@ def sub_links(uuid, url= None):
         #             if users_list:
         #                 url = server['url']
         #                 break
+    if not url:
+        logging.warning(f"sub_links: server URL not found for uuid={uuid}")
+        return {}
     BASE_URL = urlparse(url).scheme + "://" + urlparse(url).netloc
     logging.info(f"Get sub links of user - {uuid}")
     sub = {}
@@ -672,7 +675,10 @@ def restore_json_bot(file):
         return False
                 
             
-    bk_json_file = os.path.join(extract_path, os.path.basename(json_filename))
+    bk_json_file = os.path.join(extract_path, os.path.basename(json_filename)) if json_filename else None
+    if not bk_json_file or not os.path.exists(bk_json_file):
+        logging.warning("restore_json_bot: JSON backup file not found in archive")
+        return False
     # with open(bk_json_file, 'r') as f:
     #     bk_json_data = json.load(f)
     status_db = USERS_DB.restore_from_json(bk_json_file)
