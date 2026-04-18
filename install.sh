@@ -164,6 +164,9 @@ add_cron_job_if_not_exists "0 */6 * * * cd $install_dir && python3 crontab.py --
 # Add cron job to run at 12:00 PM daily
 add_cron_job_if_not_exists "0 12 * * * cd $install_dir && python3 crontab.py --reminder"
 
+# Add cron job to check YooKassa payments every 15 minutes
+add_cron_job_if_not_exists "*/15 * * * * cd $install_dir && python3 crontab.py --check-payments"
+
 
 echo -e "${GREEN}Waiting for a few seconds...${RESET}"
 sleep 5
