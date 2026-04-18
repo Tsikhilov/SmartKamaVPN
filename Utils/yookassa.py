@@ -51,7 +51,8 @@ class YooKassaPayment:
                 f"{self.base_url}/payments",
                 auth=self.auth,
                 headers=headers,
-                json=payload
+                json=payload,
+                timeout=30
             )
 
             if response.status_code == 200:
@@ -77,7 +78,8 @@ class YooKassaPayment:
         try:
             response = requests.get(
                 f"{self.base_url}/payments/{payment_id}",
-                auth=self.auth
+                auth=self.auth,
+                timeout=30
             )
 
             if response.status_code == 200:
@@ -111,7 +113,8 @@ class YooKassaPayment:
             response = requests.post(
                 f"{self.base_url}/payments/{payment_id}/cancel",
                 auth=self.auth,
-                headers=headers
+                headers=headers,
+                timeout=30
             )
 
             if response.status_code == 200:
