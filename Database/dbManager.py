@@ -1035,15 +1035,18 @@ class UserDBManager:
             logging.error(f"Error while updating YooKassa payment [{payment_id}] [{key}] to [{value}] \n Error: {e}")
             return False
 
-    def select_yookassa_payments(self):
+    def select_yookassa_payments(self, status=None):
         cur = self.conn.cursor()
         try:
-            cur.execute("SELECT * FROM yookassa_payments ORDER BY created_at DESC")
+            if status:
+                cur.execute("SELECT * FROM yookassa_payments WHERE status=? ORDER BY created_at DESC", (status,))
+            else:
+                cur.execute("SELECT * FROM yookassa_payments ORDER BY created_at DESC")
             rows = cur.fetchall()
             rows = [dict(zip([key[0] for key in cur.description], row)) for row in rows]
             return rows
         except Error as e:
-            logging.error(f"Error while selecting all YooKassa payments \n Error:{e}")
+            logging.error(f"Error while selecting YooKassa payments \n Error:{e}")
             return None
 
     def backup_to_json(self, backup_dir):

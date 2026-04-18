@@ -20,7 +20,7 @@ def cron_check_yookassa_payments():
         logging.info("YooKassa not configured — skip check_payments cron")
         return
 
-    pending = USERS_DB.select_yookassa_payments()
+    pending = USERS_DB.select_yookassa_payments(status='pending')
     if not pending:
         return
 
