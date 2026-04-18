@@ -89,7 +89,7 @@ def is_user_banned(user_id):
     return False
 # *********************************** Next-Step Handlers ***********************************
 # ----------------------------------- Buy Plan Area -----------------------------------
-charge_wallet = {}
+charge_wallet = {}        # per-user payment state: {chat_id: {'id': ..., 'amount': ...}}
 renew_subscription_dict = {}
 
 
@@ -466,17 +466,17 @@ def renewal_from_wallet_confirm(message: Message):
 
 # Next Step Buy Plan - Send Screenshot
 
-def next_step_send_screenshot(message, charge_wallet):
+def next_step_send_screenshot(message, user_charge):
     if is_it_cancel(message):
         return
-    if not charge_wallet:
+    if not user_charge:
         bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'],
                          reply_markup=main_menu_keyboard_markup())
         return
 
     if message.content_type != 'photo':
         bot.send_message(message.chat.id, MESSAGES['ERROR_TYPE_SEND_SCREENSHOT'], reply_markup=cancel_markup())
-        bot.register_next_step_handler(message, next_step_send_screenshot, charge_wallet)
+        bot.register_next_step_handler(message, next_step_send_screenshot, user_charge)
         return
 
     try:
@@ -486,7 +486,7 @@ def next_step_send_screenshot(message, charge_wallet):
         logging.warning(f"Screenshot download failed for {message.chat.id}: {e}")
         bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'], reply_markup=cancel_markup())
         return
-    file_name = f"{message.chat.id}-{charge_wallet['id']}.jpg"
+    file_name = f"{message.chat.id}-{user_charge['id']}.jpg"
     path_recp = os.path.join(os.getcwd(), 'UserBot', 'Receiptions', file_name)
     if not os.path.exists(os.path.join(os.getcwd(), 'UserBot', 'Receiptions')):
         os.makedirs(os.path.join(os.getcwd(), 'UserBot', 'Receiptions'))
@@ -497,10 +497,10 @@ def next_step_send_screenshot(message, charge_wallet):
 
     payment_method = "Card"
 
-    status = USERS_DB.add_payment(charge_wallet['id'], message.chat.id,
-                                  charge_wallet['amount'], payment_method, file_name, created_at)
+    status = USERS_DB.add_payment(user_charge['id'], message.chat.id,
+                                  user_charge['amount'], payment_method, file_name, created_at)
     if status:
-        payment = USERS_DB.find_payment(id=charge_wallet['id'])
+        payment = USERS_DB.find_payment(id=user_charge['id'])
         if not payment:
             bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'],
                              reply_markup=main_menu_keyboard_markup())
@@ -513,9 +513,13 @@ def next_step_send_screenshot(message, charge_wallet):
             return
         user_data = user_data[0]
         for ADMIN in ADMINS_ID:
-            admin_bot.send_photo(ADMIN, open(path_recp, 'rb'),
-                                 caption=payment_received_template(payment,user_data),
-                                 reply_markup=confirm_payment_by_admin(charge_wallet['id']))
+            try:
+                admin_bot.send_photo(ADMIN, open(path_recp, 'rb'),
+                                     caption=payment_received_template(payment,user_data),
+                                     reply_markup=confirm_payment_by_admin(user_charge['id']))
+            except Exception as e:
+                logging.warning("admin_bot send_photo failed for %s: %s", ADMIN, e)
+        charge_wallet.pop(message.chat.id, None)
         bot.send_message(message.chat.id, MESSAGES['WAIT_FOR_ADMIN_CONFIRMATION'],
                          reply_markup=main_menu_keyboard_markup())
     else:
@@ -925,37 +929,29 @@ def next_step_increase_wallet_balance(message):
                          reply_markup=main_menu_keyboard_markup())
         return
 
-    charge_wallet['amount'] = str(amount)
+    user_cw = {'amount': str(amount), 'id': random.randint(1000000, 9999999)}
     if settings.get('three_random_num_price') == 1:
-        charge_wallet['amount'] = utils.replace_last_three_with_random(str(amount))
+        user_cw['amount'] = utils.replace_last_three_with_random(str(amount))
+    charge_wallet[message.chat.id] = user_cw
 
-    charge_wallet['id'] = random.randint(1000000, 9999999)
     # Send 0 to identify wallet balance charge
     bot.send_message(message.chat.id,
-                     owner_info_template(settings.get('card_number'), settings.get('card_holder'), charge_wallet['amount']),
-                     reply_markup=send_screenshot_markup(plan_id=charge_wallet['id']))
+                     owner_info_template(settings.get('card_number'), settings.get('card_holder'), user_cw['amount']),
+                     reply_markup=send_screenshot_markup(plan_id=user_cw['id']))
 
-def increase_wallet_balance_specific(message,amount):
+
+def increase_wallet_balance_specific(message, amount):
+    """Handle a specific (pre-set) wallet top-up amount."""
     settings = utils.all_configs_settings()
-    user = USERS_DB.find_user(telegram_id=message.chat.id)
-    if user:
-        wallet_status = USERS_DB.find_wallet(telegram_id=message.chat.id)
-        if not wallet_status:
-            status = USERS_DB.add_wallet(telegram_id=message.chat.id)
-            if not status:
-                bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'])
-                return
-    charge_wallet['amount'] = str(amount)
-    if settings.get('three_random_num_price') == 1:
-        charge_wallet['amount'] = utils.replace_last_three_with_random(str(amount))
-
-    charge_wallet['id'] = random.randint(1000000, 9999999)
-
-    # Send 0 to identify wallet balance charge
+    if not settings:
+        bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'],
+                         reply_markup=main_menu_keyboard_markup())
+        return
+    user_cw = {'amount': str(amount), 'id': random.randint(1000000, 9999999)}
+    charge_wallet[message.chat.id] = user_cw
     bot.send_message(message.chat.id,
-                     owner_info_template(settings.get('card_number'), settings.get('card_holder'), charge_wallet['amount']),
-                     reply_markup=send_screenshot_markup(plan_id=charge_wallet['id']))
-    
+                     owner_info_template(settings.get('card_number'), settings.get('card_holder'), user_cw['amount']),
+                     reply_markup=send_screenshot_markup(plan_id=user_cw['id']))
 
 
 def update_info_subscription(message: Message, uuid,markup=None):
@@ -1136,7 +1132,8 @@ def _handle_callback_query(call: CallbackQuery):
     elif key == 'send_screenshot':
         bot.delete_message(call.message.chat.id, call.message.message_id)
         bot.send_message(call.message.chat.id, MESSAGES['REQUEST_SEND_SCREENSHOT'])
-        bot.register_next_step_handler(call.message, next_step_send_screenshot, charge_wallet)
+        user_cw = charge_wallet.get(call.message.chat.id)
+        bot.register_next_step_handler(call.message, next_step_send_screenshot, user_cw)
 
     #Answer to Admin After send Screenshot
     elif key == 'answer_to_admin':
