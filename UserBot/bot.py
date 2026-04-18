@@ -1622,33 +1622,62 @@ def callback_query(call: CallbackQuery):
 def start_bot(message: Message):
     if is_user_banned(message.chat.id):
         return
-    settings = utils.all_configs_settings()
 
+    # Check channel membership before anything else
+    join_status = is_user_in_channel(message.chat.id)
+    if not join_status:
+        return
+
+    settings = utils.all_configs_settings()
     MESSAGES['WELCOME'] = MESSAGES['WELCOME'] if not settings['msg_user_start'] else settings['msg_user_start']
-    
+
+    # Handle referral deep link: /start ref_<telegram_id>
+    referrer_id = None
+    if message.text and len(message.text.split()) > 1:
+        param = message.text.split()[1]
+        if param.startswith('ref_'):
+            try:
+                referrer_id = int(param[4:])
+                if referrer_id == message.chat.id:
+                    referrer_id = None
+            except ValueError:
+                referrer_id = None
+
     if USERS_DB.find_user(telegram_id=message.chat.id):
-        edit_name= USERS_DB.edit_user(telegram_id=message.chat.id,full_name=message.from_user.full_name)
-        edit_username = USERS_DB.edit_user(telegram_id=message.chat.id,username=message.from_user.username)
-        _send_velvet_main_menu(message.chat.id)
+        USERS_DB.edit_user(telegram_id=message.chat.id, full_name=message.from_user.full_name)
+        USERS_DB.edit_user(telegram_id=message.chat.id, username=message.from_user.username)
     else:
         created_at = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        status = USERS_DB.add_user(telegram_id=message.chat.id,username=message.from_user.username, full_name=message.from_user.full_name, created_at=created_at)
+        status = USERS_DB.add_user(
+            telegram_id=message.chat.id,
+            username=message.from_user.username,
+            full_name=message.from_user.full_name,
+            created_at=created_at,
+        )
         if not status:
             bot.send_message(message.chat.id, MESSAGES['UNKNOWN_ERROR'],
                              reply_markup=main_menu_keyboard_markup())
             return
-        wallet_status = USERS_DB.find_wallet(telegram_id=message.chat.id)
-        if not wallet_status:
-            status = USERS_DB.add_wallet(telegram_id=message.chat.id)
-            if not status:
+
+        if not USERS_DB.find_wallet(telegram_id=message.chat.id):
+            if not USERS_DB.add_wallet(telegram_id=message.chat.id):
                 bot.send_message(message.chat.id, f"{MESSAGES['UNKNOWN_ERROR']}:Wallet",
                                  reply_markup=main_menu_keyboard_markup())
                 return
-            _send_velvet_main_menu(message.chat.id)
 
-    join_status = is_user_in_channel(message.chat.id)
-    if not join_status:
-        return
+        # Notify referrer about new user
+        if referrer_id and USERS_DB.find_user(telegram_id=referrer_id):
+            try:
+                name = message.from_user.first_name or message.from_user.username or "Пользователь"
+                bot.send_message(
+                    referrer_id,
+                    f"🎉 По вашей реферальной ссылке зарегистрировался новый пользователь: <b>{name}</b>!",
+                    parse_mode="HTML",
+                )
+            except Exception:
+                pass
+
+    _send_velvet_main_menu(message.chat.id)
 
 
 @bot.message_handler(commands=['subscriptions'])
